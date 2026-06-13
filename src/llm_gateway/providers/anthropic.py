@@ -16,15 +16,17 @@ friendly and reused by docs/examples.
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
 
 from ..config import ProviderConfig
 from ..tokens import count_prompt_tokens, count_tokens, message_text
-from .base import ProviderError, ProviderResult
+from .base import ProviderError, ProviderResult, StreamChunk
 
 DEFAULT_BASE_URL = "https://api.anthropic.com/v1"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -160,6 +162,104 @@ class AnthropicProvider:
         )
         return ProviderResult(
             response=openai_shaped,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
+
+    async def stream_chat(  # pragma: no cover - network path
+        self,
+        *,
+        upstream_model: str,
+        messages: list[dict],
+        params: dict,
+    ) -> AsyncIterator[StreamChunk]:
+        """Stream Anthropic's Messages SSE, translating deltas to OpenAI shape.
+
+        Anthropic emits typed events: ``message_start`` (carries input token
+        usage), ``content_block_delta`` (``delta.text`` — the incremental text),
+        ``message_delta`` (carries ``usage.output_tokens`` + ``stop_reason``),
+        and ``message_stop``. We translate each text delta into a
+        :class:`StreamChunk` and surface usage/stop on the terminal chunk.
+        """
+        key = self.cfg.resolved_key()
+        if not key:
+            raise ProviderError(
+                "Anthropic provider has no API key configured "
+                "(set api_key or api_key_env)",
+                status_code=500,
+                provider_name=self.name,
+            )
+
+        body = to_anthropic_request(upstream_model, messages, params)
+        body["stream"] = True
+        headers = {
+            "x-api-key": key,
+            "anthropic-version": ANTHROPIC_VERSION,
+            "content-type": "application/json",
+        }
+        url = f"{self.base_url}/messages"
+
+        prompt_tokens: int | None = None
+        completion_tokens: int | None = None
+        stop_reason: str | None = None
+        accumulated: list[str] = []
+        try:
+            async with httpx.AsyncClient(timeout=self.cfg.timeout) as client:
+                async with client.stream("POST", url, json=body, headers=headers) as resp:
+                    if resp.status_code >= 400:
+                        text = (await resp.aread()).decode("utf-8", "replace")
+                        raise ProviderError(
+                            f"Anthropic upstream error {resp.status_code}: {text[:500]}",
+                            status_code=resp.status_code,
+                            provider_name=self.name,
+                        )
+                    async for line in resp.aiter_lines():
+                        line = line.strip()
+                        if not line.startswith("data:"):
+                            continue
+                        data_str = line[len("data:") :].strip()
+                        if not data_str:
+                            continue
+                        try:
+                            event = json.loads(data_str)
+                        except (json.JSONDecodeError, ValueError):
+                            continue
+                        etype = event.get("type")
+                        if etype == "message_start":
+                            usage = (event.get("message") or {}).get("usage") or {}
+                            prompt_tokens = usage.get("input_tokens", prompt_tokens)
+                        elif etype == "content_block_delta":
+                            delta = event.get("delta") or {}
+                            text = delta.get("text") or ""
+                            if text:
+                                accumulated.append(text)
+                                yield StreamChunk(delta_content=text)
+                        elif etype == "message_delta":
+                            usage = event.get("usage") or {}
+                            if "output_tokens" in usage:
+                                completion_tokens = usage["output_tokens"]
+                            d = event.get("delta") or {}
+                            if d.get("stop_reason"):
+                                stop_reason = d["stop_reason"]
+        except httpx.HTTPError as exc:
+            raise ProviderError(
+                f"Anthropic request failed: {exc}",
+                status_code=502,
+                provider_name=self.name,
+            ) from exc
+
+        if prompt_tokens is None:
+            prompt_tokens = count_prompt_tokens(messages)
+        if completion_tokens is None:
+            completion_tokens = count_tokens("".join(accumulated))
+        finish = {
+            "end_turn": "stop",
+            "max_tokens": "length",
+            "stop_sequence": "stop",
+        }.get(stop_reason, "stop")
+        yield StreamChunk(
+            delta_content="",
+            finish_reason=finish,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
         )

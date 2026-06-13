@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import AsyncIterator
 from typing import Any
 
 from ..config import ProviderConfig
 from ..tokens import count_prompt_tokens, count_tokens, message_text
-from .base import ProviderResult
+from .base import ProviderResult, StreamChunk
 
 
 class MockProvider:
@@ -67,6 +68,42 @@ class MockProvider:
         }
         return ProviderResult(
             response=response,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
+
+    @staticmethod
+    def _chunk_text(text: str, n: int = 4) -> list[str]:
+        """Split ``text`` into ``n`` roughly-equal, word-boundary-ish pieces.
+
+        Deterministic so streaming tests are reproducible. The pieces, when
+        concatenated, reproduce ``text`` exactly.
+        """
+        if not text:
+            return [""]
+        n = max(1, min(n, len(text)))
+        size = max(1, -(-len(text) // n))  # ceil division
+        return [text[i : i + size] for i in range(0, len(text), size)]
+
+    async def stream_chat(
+        self,
+        *,
+        upstream_model: str,
+        messages: list[dict],
+        params: dict,
+    ) -> AsyncIterator[StreamChunk]:
+        """Simulate a token-by-token stream of the echoed completion."""
+        text = self._completion_text(messages)
+        prompt_tokens = count_prompt_tokens(messages)
+        completion_tokens = count_tokens(text)
+
+        for piece in self._chunk_text(text):
+            yield StreamChunk(delta_content=piece)
+
+        # Terminal chunk carries the finish reason and final usage.
+        yield StreamChunk(
+            delta_content="",
+            finish_reason="stop",
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
         )

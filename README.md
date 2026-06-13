@@ -46,9 +46,10 @@ in. That's the [JTF](#jtf-the-differentiator) feature.
                     ┌──────────────────────────────────────────────┐
   OpenAI SDK  ──▶   │  FastAPI app  (app.py)                        │
   (base_url =       │    auth (Bearer vkey) ─ require_key           │
-   gateway)         │    POST /v1/chat/completions                  │
+   gateway)         │    POST /v1/chat/completions  (+ SSE stream)  │
                     │    GET  /v1/models                            │
                     │    GET  /admin/usage  /admin/pricing          │
+                    │    GET  /dashboard  (Electric Cyan admin UI)  │
                     └───────────────┬──────────────────────────────┘
                                     ▼
                     ┌──────────────────────────────────────────────┐
@@ -124,6 +125,43 @@ print(resp.choices[0].message.content)
 ```
 
 Point `base_url` at the gateway and existing OpenAI code just works.
+
+### Streaming (`stream: true`)
+
+Set `"stream": true` and the gateway returns OpenAI-style **Server-Sent Events**
+(`Content-Type: text/event-stream`): a sequence of `data: {chunk}\n\n` frames of
+`chat.completion.chunk` objects (each with a `choices[].delta`), terminated by
+`data: [DONE]\n\n`. The OpenAI SDK consumes this natively:
+
+```python
+stream = client.chat.completions.create(
+    model="mock-echo",
+    messages=[{"role": "user", "content": "stream me"}],
+    stream=True,
+)
+for chunk in stream:
+    print(chunk.choices[0].delta.content or "", end="", flush=True)
+```
+
+Or with `curl`:
+
+```sh
+curl -N http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer sk-gw-dev" -H "Content-Type: application/json" \
+  -d '{"model":"mock-echo","messages":[{"role":"user","content":"hi"}],"stream":true}'
+```
+
+How it behaves:
+
+- The **budget pre-check runs before the stream starts** — an over-budget
+  request fails with **HTTP 402** (clean JSON error), never a half-broken stream.
+- Streamed content and token **usage are accumulated and recorded per key
+  *after* the stream completes** (the final chunk also carries a `usage` block).
+- **Caching is bypassed for streaming requests** (there's no single object to
+  serve mid-flight) — non-streaming requests still use the exact-match cache.
+- The **mock** provider simulates a token-by-token stream; **OpenAI** streams
+  via passthrough; **Anthropic** translates its Messages SSE deltas to OpenAI
+  chunks.
 
 ## Configuration
 
@@ -212,10 +250,35 @@ uses it two ways:
 ## Observability
 
 - Structured request logging (per-request rows in SQLite `request_log`).
-- `GET /admin/usage` — per key: requests, tokens, $ spent, **budget remaining**,
-  **cache-hit rate**, and **JTF potential tokens saved**.
+- `GET /admin/usage` — portfolio **totals** plus per key: requests, tokens,
+  $ spent, **budget remaining**, **cache-hit rate**, and **JTF potential tokens
+  saved**.
 - `GET /admin/pricing` — the active pricing table.
 - Response headers: `X-Cache`, `X-Cost-USD`, `X-Provider`, `X-JTF-*`.
+
+### Dashboard
+
+A polished, self-contained admin dashboard is served at **`GET /dashboard`**.
+It auto-refreshes (every 4s, with a live indicator), fetches `/admin/usage`, and
+renders a totals header (total requests · tokens · $ spent · cache-hit rate ·
+JTF tokens saved) plus per-key cards with a **$ spent vs budget progress bar**
+(cyan → amber → red as it fills), cache-hit rate, and JTF savings. It renders
+gracefully with zero data and is mobile-responsive. Vanilla JS, no build step,
+clean inline SVG icons, and it honors `prefers-reduced-motion`.
+
+![llm-gateway dashboard — usage, budgets, cache, JTF savings](docs/dashboard.png)
+
+> The dashboard lives at `/dashboard`. With an `admin_token` configured (see
+> below), open it as `/dashboard?admin_token=<token>` — the page forwards the
+> token to its data fetch.
+
+### Admin auth (optional)
+
+`/admin/*` is **open by default** so the quickstart and dashboard work out of
+the box. To gate it, set `admin_token` in `config.yaml` (or `$GATEWAY_ADMIN_TOKEN`).
+Then supply it as the `X-Admin-Token` header, or as `?admin_token=...` for the
+dashboard. The `/dashboard` HTML page itself stays public; the **data** behind
+it (`/admin/usage`) is what's protected.
 
 ## Docker
 
@@ -235,12 +298,11 @@ pytest                 # all green, no keys, no network
 ```
 
 Tests cover auth (401), routing/OpenAI shape, budgets (402), caching (hit billed
-$0), cost math, the Anthropic translation, and both JTF paths — all on the mock
-provider.
+$0), cost math, the Anthropic translation, both JTF paths, **SSE streaming**, and
+the **dashboard + `/admin/usage`** shape — all on the mock provider.
 
 ## Roadmap
 
-- **Streaming** (`stream: true` via SSE) for `/v1/chat/completions`.
 - **Semantic cache** (embedding-based near-duplicate hits), beyond exact-match.
 - **More providers**: Google Gemini, Mistral, Bedrock, Azure OpenAI.
 - Admin-token auth for `/admin/*`, Prometheus metrics, rate limiting.

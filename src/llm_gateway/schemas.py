@@ -1,9 +1,11 @@
 """Pydantic v2 schemas for the OpenAI-compatible wire format.
 
 These mirror the subset of the OpenAI Chat Completions API that the gateway
-implements (non-streaming). They are intentionally permissive: unknown fields
-on the request are preserved via ``model_config`` so we can forward them
-upstream unchanged.
+implements. ``stream: true`` is supported and returns Server-Sent Events of
+``chat.completion.chunk`` objects (see ``app.py``); the schemas below describe
+the non-streaming request/response shapes. They are intentionally permissive:
+unknown fields on the request are preserved via ``model_config`` so we can
+forward them upstream unchanged.
 """
 
 from __future__ import annotations

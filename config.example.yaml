@@ -18,6 +18,12 @@ cache:
   enabled: true
   ttl_seconds: 3600
 
+# Optional shared secret to gate the /admin/* endpoints (and the dashboard's
+# data fetch). When unset, /admin/* is open — convenient for local/dev/CI. When
+# set, pass it as the `X-Admin-Token` header, or open the dashboard at
+# /dashboard?admin_token=<token>. Can also be supplied via $GATEWAY_ADMIN_TOKEN.
+# admin_token: "change-me-please"
+
 # ---------------------------------------------------------------------------
 # Providers (adapters). `mock` is always available even if omitted here.
 # Upstream secrets are read from env vars via `api_key_env` so they never need

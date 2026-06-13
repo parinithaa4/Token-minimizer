@@ -8,7 +8,7 @@ API) and the actual network call.
 """
 
 from .anthropic import AnthropicProvider
-from .base import Provider, ProviderError, ProviderResult
+from .base import Provider, ProviderError, ProviderResult, StreamChunk
 from .mock import MockProvider
 from .ollama import OllamaProvider
 from .openai import OpenAIProvider
@@ -17,6 +17,7 @@ __all__ = [
     "Provider",
     "ProviderError",
     "ProviderResult",
+    "StreamChunk",
     "MockProvider",
     "OpenAIProvider",
     "AnthropicProvider",

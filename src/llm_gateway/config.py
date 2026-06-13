@@ -70,6 +70,9 @@ class GatewayConfig:
     database_url: str = "sqlite:///./gateway.db"
     cache_enabled: bool = True
     cache_ttl_seconds: int = 3600
+    # Optional shared secret to gate ``/admin/*`` (and the dashboard's fetch).
+    # When ``None`` the admin endpoints are open (handy for local/dev/CI).
+    admin_token: str | None = None
 
     def route_for(self, model: str) -> RouteConfig | None:
         return self.routes.get(model)
@@ -106,6 +109,7 @@ def default_config() -> GatewayConfig:
         routes=routes,
         keys=keys,
         redis_url=os.environ.get("REDIS_URL"),
+        admin_token=os.environ.get("GATEWAY_ADMIN_TOKEN"),
     )
 
 
@@ -202,4 +206,5 @@ def load_config(path: str | None = None) -> GatewayConfig:
         database_url=raw.get("database_url", "sqlite:///./gateway.db"),
         cache_enabled=bool(cache.get("enabled", True)),
         cache_ttl_seconds=int(cache.get("ttl_seconds", 3600)),
+        admin_token=raw.get("admin_token") or os.environ.get("GATEWAY_ADMIN_TOKEN"),
     )

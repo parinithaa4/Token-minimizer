@@ -21,6 +21,7 @@ Request lifecycle:
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -28,7 +29,7 @@ from .cache import CacheBackend, make_cache_key
 from .config import GatewayConfig
 from .jtf_ops import analyze_messages, compress_messages
 from .pricing import PricingTable
-from .providers import Provider, ProviderError, build_provider
+from .providers import Provider, ProviderError, StreamChunk, build_provider
 from .store import Store, VirtualKey
 from .tokens import count_prompt_tokens
 
@@ -254,6 +255,147 @@ class Gateway:
             model=model,
             jtf=jtf_meta,
             jtf_compressed=jtf_compressed,
+        )
+
+    # ----- streaming entrypoint --------------------------------------------
+
+    async def chat_completion_stream(
+        self,
+        *,
+        vkey: VirtualKey,
+        payload: dict,
+        jtf_compress: bool = False,
+    ) -> AsyncIterator[StreamChunk]:
+        """Stream a chat completion as normalized :class:`StreamChunk` deltas.
+
+        Validation, routing, authorization and the **budget pre-check all happen
+        before the first chunk is yielded**, so an over-budget request raises
+        :class:`GatewayError` (→ 402) instead of producing a broken stream.
+
+        Caching is **bypassed** for streaming requests: a stream is consumed
+        incrementally and there is no single cached object to serve mid-flight,
+        so we keep it simple and always go to the provider. (Non-streaming
+        requests still use the cache.) Usage is accumulated from the streamed
+        chunks and recorded **after** the stream completes — the caller must
+        exhaust the iterator for billing to land.
+        """
+        model = payload.get("model")
+        if not model:
+            raise GatewayError(400, "'model' is required", "invalid_request_error")
+
+        messages = [dict(m) for m in payload.get("messages", [])]
+        if not messages:
+            raise GatewayError(
+                400, "'messages' must be a non-empty list", "invalid_request_error"
+            )
+
+        route = self.config.route_for(model)
+        if route is None:
+            raise GatewayError(
+                404,
+                f"model {model!r} is not available on this gateway",
+                "model_not_found",
+                code="model_not_found",
+            )
+
+        if vkey.allowed_models and model not in vkey.allowed_models:
+            raise GatewayError(
+                403,
+                f"key {vkey.name!r} is not permitted to use model {model!r}",
+                "permission_error",
+            )
+
+        params = self._extract_params(payload)
+
+        # JTF analysis (non-destructive) + optional compression, as in the
+        # non-streaming path.
+        jtf_analysis = analyze_messages(messages)
+        forwarded_messages = messages
+        if jtf_compress:
+            forwarded_messages, realized = compress_messages(messages)
+
+        # Pre-flight budget check BEFORE the stream starts.
+        est_prompt = count_prompt_tokens(forwarded_messages)
+        est_completion = int(params.get("max_tokens") or 256)
+        est_cost = self.pricing.cost_usd(
+            route.upstream_model, est_prompt, est_completion
+        )
+        reason = self.store.would_exceed_budget(
+            vkey.key, vkey, est_cost, est_prompt + est_completion
+        )
+        if reason is not None:
+            self.store.log_request(
+                key=vkey.key,
+                model=model,
+                provider=route.provider,
+                prompt_tokens=0,
+                completion_tokens=0,
+                cost_usd=0.0,
+                cache_hit=False,
+                jtf_saved=0,
+                status=402,
+            )
+            raise GatewayError(
+                402, reason, "insufficient_quota", code="budget_exceeded"
+            )
+
+        provider = self.provider_for(route.provider)
+        if not hasattr(provider, "stream_chat"):  # pragma: no cover - defensive
+            raise GatewayError(
+                400,
+                f"provider {route.provider!r} does not support streaming",
+                "invalid_request_error",
+            )
+
+        prompt_tokens = 0
+        completion_tokens = 0
+        try:
+            async for chunk in provider.stream_chat(
+                upstream_model=route.upstream_model,
+                messages=forwarded_messages,
+                params=params,
+            ):
+                if chunk.prompt_tokens is not None:
+                    prompt_tokens = chunk.prompt_tokens
+                if chunk.completion_tokens is not None:
+                    completion_tokens = chunk.completion_tokens
+                yield chunk
+        except ProviderError as exc:
+            self.store.log_request(
+                key=vkey.key,
+                model=model,
+                provider=route.provider,
+                prompt_tokens=0,
+                completion_tokens=0,
+                cost_usd=0.0,
+                cache_hit=False,
+                jtf_saved=0,
+                status=exc.status_code,
+            )
+            raise GatewayError(exc.status_code, exc.message, "upstream_error") from exc
+
+        # Record usage AFTER the stream completes.
+        cost = self.pricing.cost_usd(
+            route.upstream_model, prompt_tokens, completion_tokens
+        )
+        self.store.record_usage(
+            vkey.key,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_usd=cost,
+            cache_hit=False,
+            jtf_saved=jtf_analysis.saved_tokens,
+        )
+        self.store.log_request(
+            key=vkey.key,
+            model=model,
+            provider=route.provider,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_usd=cost,
+            cache_hit=False,
+            jtf_saved=jtf_analysis.saved_tokens,
+            status=200,
         )
 
     async def _call_with_fallback(self, route, messages, params):

@@ -16,14 +16,19 @@ headers (``X-Cache``, ``X-Cost-USD``, ``X-JTF-*``) and inside
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import time
+import uuid
+from collections.abc import AsyncIterator
 
 from fastapi import Depends, FastAPI, Header, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from .cache import build_cache
 from .config import GatewayConfig, load_config
+from .dashboard import DASHBOARD_HTML
 from .gateway import Gateway, GatewayError
 from .pricing import PricingTable
 from .schemas import (
@@ -41,6 +46,105 @@ log = logging.getLogger("llm_gateway")
 def _error_response(status: int, message: str, err_type: str, code: str | None = None):
     body = ErrorResponse(error=ErrorBody(message=message, type=err_type, code=code))
     return JSONResponse(status_code=status, content=body.model_dump())
+
+
+def _sse_event(obj: dict) -> str:
+    """Format one OpenAI-style SSE frame: ``data: {json}\\n\\n``."""
+    return "data: " + json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n\n"
+
+
+def _chunk_obj(
+    stream_id: str,
+    created: int,
+    model: str,
+    *,
+    delta: dict,
+    finish_reason: str | None = None,
+) -> dict:
+    """Build an OpenAI ``chat.completion.chunk`` object."""
+    return {
+        "id": stream_id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+    }
+
+
+async def _sse_from_chunks(agen, *, model: str) -> AsyncIterator[str]:
+    """Translate normalized gateway :class:`StreamChunk`s into OpenAI SSE text.
+
+    Emits, in order: a role-priming chunk, one chunk per content delta, a final
+    chunk with ``finish_reason`` (and usage when available), then the
+    ``data: [DONE]`` sentinel. Stepping this generator once drives the gateway's
+    budget pre-check before any frame is produced.
+    """
+    stream_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+    created = int(time.time())
+
+    # Pull the first gateway chunk first — this triggers validation + the budget
+    # pre-check inside ``chat_completion_stream`` (may raise GatewayError).
+    aiter = agen.__aiter__()
+    try:
+        first = await aiter.__anext__()
+    except StopAsyncIteration:
+        first = None
+
+    # Role-priming frame (OpenAI sends an initial delta with just the role).
+    yield _sse_event(
+        _chunk_obj(stream_id, created, model, delta={"role": "assistant"})
+    )
+
+    finish_reason: str | None = None
+    usage: dict | None = None
+
+    def _emit(chunk) -> str | None:
+        nonlocal finish_reason, usage
+        if chunk.finish_reason is not None:
+            finish_reason = chunk.finish_reason
+        if chunk.prompt_tokens is not None or chunk.completion_tokens is not None:
+            pt = chunk.prompt_tokens or 0
+            ct = chunk.completion_tokens or 0
+            usage = {
+                "prompt_tokens": pt,
+                "completion_tokens": ct,
+                "total_tokens": pt + ct,
+            }
+        if chunk.delta_content:
+            return _sse_event(
+                _chunk_obj(
+                    stream_id,
+                    created,
+                    model,
+                    delta={"content": chunk.delta_content},
+                )
+            )
+        return None
+
+    if first is not None:
+        frame = _emit(first)
+        if frame is not None:
+            yield frame
+        async for chunk in aiter:
+            frame = _emit(chunk)
+            if frame is not None:
+                yield frame
+
+    # Terminal chunk: empty delta + finish_reason, plus usage when known.
+    final = _chunk_obj(
+        stream_id, created, model, delta={}, finish_reason=finish_reason or "stop"
+    )
+    if usage is not None:
+        final["usage"] = usage
+    yield _sse_event(final)
+    yield "data: [DONE]\n\n"
+
+
+async def _prepend(first: str, rest: AsyncIterator[str]) -> AsyncIterator[str]:
+    """Yield an already-fetched first frame, then the remainder of ``rest``."""
+    yield first
+    async for item in rest:
+        yield item
 
 
 def seed_store_from_config(store: Store, config: GatewayConfig) -> None:
@@ -134,17 +238,29 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         x_jtf_compress: str | None = Header(default=None),
         x_cache: str | None = Header(default=None),
     ):
-        if body.stream:
-            raise GatewayError(
-                400,
-                "streaming is not supported yet (see roadmap); set stream=false",
-                "invalid_request_error",
-            )
-
         payload = body.model_dump(exclude_none=True)
         jtf_compress = (x_jtf_compress or "").strip().lower() in ("1", "true", "yes")
         # Per-request cache override: X-Cache: no-store disables caching.
         cache_enabled = (x_cache or "").strip().lower() not in ("no-store", "off", "false")
+
+        # --- Streaming path (OpenAI-style SSE). ---
+        if body.stream:
+            sse = _sse_from_chunks(
+                gateway.chat_completion_stream(
+                    vkey=vkey, payload=payload, jtf_compress=jtf_compress
+                ),
+                model=body.model,
+            )
+            # Drive the generator once *before* returning the response. This runs
+            # validation + the budget pre-check (which may raise GatewayError →
+            # 402) so an over-budget request never produces a partial stream. The
+            # already-fetched first frame is replayed by ``_prepend``.
+            first_frame = await sse.__anext__()
+            return StreamingResponse(
+                _prepend(first_frame, sse),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
 
         result = await gateway.chat_completion(
             vkey=vkey,
@@ -175,15 +291,37 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         }
         return JSONResponse(content=response, headers=headers)
 
-    @app.get("/admin/usage")
-    async def admin_usage(_request: Request):
-        """Per-key observability snapshot. Self-hosted/internal — no auth gate.
-
-        In a real deployment you'd protect this with an admin token; kept open
-        here so the quickstart and dashboards work out of the box.
+    def _require_admin(request: Request) -> None:
+        """Optional admin gate. If ``config.admin_token`` is set, require it via
+        ``X-Admin-Token`` header or ``?admin_token=`` query (the dashboard uses
+        the latter). When unset, ``/admin/*`` stays open for the quickstart.
         """
+        token = config.admin_token
+        if not token:
+            return
+        supplied = request.headers.get("x-admin-token") or request.query_params.get(
+            "admin_token"
+        )
+        if supplied != token:
+            raise GatewayError(
+                401, "invalid or missing admin token", "authentication_error",
+                code="invalid_admin_token",
+            )
+
+    @app.get("/admin/usage")
+    async def admin_usage(request: Request):
+        """Per-key observability snapshot + portfolio totals.
+
+        Self-hosted/internal. If ``admin_token`` is configured it must be
+        supplied (header ``X-Admin-Token`` or ``?admin_token=``); otherwise the
+        endpoint is open so the quickstart and dashboard work out of the box.
+        """
+        _require_admin(request)
         keys = store.list_keys()
         out = []
+        tot_requests = tot_cache_hits = 0
+        tot_tokens = tot_jtf = 0
+        tot_cost = 0.0
         for vk in keys:
             u: KeyUsage = store.get_usage(vk.key)
             hit_rate = (u.cache_hits / u.requests) if u.requests else 0.0
@@ -194,6 +332,11 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
                 None
                 if vk.max_tokens is None
                 else max(0, vk.max_tokens - u.total_tokens)
+            )
+            budget_used_ratio = (
+                None
+                if vk.max_usd is None or vk.max_usd <= 0
+                else min(1.0, u.cost_usd / vk.max_usd)
             )
             out.append(
                 {
@@ -210,16 +353,47 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
                     "budget_remaining_usd": (
                         None if budget_remaining_usd is None else round(budget_remaining_usd, 6)
                     ),
+                    "budget_used_ratio": (
+                        None if budget_used_ratio is None else round(budget_used_ratio, 4)
+                    ),
                     "budget_tokens": vk.max_tokens,
                     "budget_remaining_tokens": budget_remaining_tokens,
                     "jtf_potential_tokens_saved": u.jtf_potential_tokens_saved,
                 }
             )
-        return {"keys": out}
+            tot_requests += u.requests
+            tot_cache_hits += u.cache_hits
+            tot_tokens += u.total_tokens
+            tot_cost += u.cost_usd
+            tot_jtf += u.jtf_potential_tokens_saved
+
+        totals = {
+            "keys": len(keys),
+            "requests": tot_requests,
+            "cache_hits": tot_cache_hits,
+            "cache_hit_rate": round(tot_cache_hits / tot_requests, 4)
+            if tot_requests
+            else 0.0,
+            "total_tokens": tot_tokens,
+            "cost_usd": round(tot_cost, 6),
+            "jtf_potential_tokens_saved": tot_jtf,
+        }
+        return {"totals": totals, "keys": out}
 
     @app.get("/admin/pricing")
-    async def admin_pricing(_request: Request):
+    async def admin_pricing(request: Request):
+        _require_admin(request)
         return {"prices_per_mtok_usd": pricing.as_dict()}
+
+    @app.get("/dashboard", response_class=HTMLResponse)
+    async def dashboard():
+        """Serve the self-contained admin dashboard (inline HTML/CSS/JS).
+
+        The page fetches ``/admin/usage`` client-side and renders totals +
+        per-key cards. If ``admin_token`` is configured, append it to the URL as
+        ``/dashboard?admin_token=...`` — the page forwards it to the fetch.
+        """
+        return HTMLResponse(content=DASHBOARD_HTML)
 
     return app
 

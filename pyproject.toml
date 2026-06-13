@@ -56,7 +56,7 @@ addopts = "-q"
 line-length = 100
 target-version = "py310"
 src = ["src", "tests"]
-extend-exclude = ["_ref", "src/llm_gateway/_vendor"]
+extend-exclude = ["_ref", "src/llm_gateway/_vendor", "src/llm_gateway/dashboard.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]

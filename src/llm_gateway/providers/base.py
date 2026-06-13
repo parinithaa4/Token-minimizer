@@ -2,8 +2,26 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Protocol
+
+
+@dataclass
+class StreamChunk:
+    """One streamed delta from a provider, normalized to the OpenAI shape.
+
+    ``delta_content`` is the incremental assistant text for this chunk (may be
+    empty for the role-priming chunk or the final stop chunk). ``finish_reason``
+    is set only on the terminal chunk. ``prompt_tokens`` / ``completion_tokens``
+    carry the final usage when the provider reports it (typically on the last
+    chunk); they are ``None`` on intermediate chunks.
+    """
+
+    delta_content: str = ""
+    finish_reason: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
 
 
 class ProviderError(Exception):
@@ -56,4 +74,18 @@ class Provider(Protocol):
         params: dict,
     ) -> ProviderResult:
         """Run a non-streaming chat completion and return a normalized result."""
+        ...
+
+    def stream_chat(
+        self,
+        *,
+        upstream_model: str,
+        messages: list[dict],
+        params: dict,
+    ) -> AsyncIterator[StreamChunk]:
+        """Stream a chat completion as normalized :class:`StreamChunk` deltas.
+
+        Optional: providers that cannot stream omit this and the gateway falls
+        back to a single-shot non-streaming call adapted into one chunk.
+        """
         ...
