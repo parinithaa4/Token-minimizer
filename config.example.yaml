@@ -1,0 +1,97 @@
+# llm-gateway example configuration.
+#
+# Copy to config.yaml and point the server at it:
+#     GATEWAY_CONFIG=config.yaml uvicorn llm_gateway.app:app
+#
+# Everything here is optional: with NO config file the gateway boots with just
+# the built-in `mock` provider and a dev key (sk-gw-dev) so you can try it
+# immediately without any real API keys.
+
+# Where the SQLite keys/usage DB lives. Use :memory: for ephemeral dev.
+database_url: "sqlite:///./gateway.db"
+
+# Optional Redis for the response cache. If unset (or unreachable) the gateway
+# transparently falls back to an in-memory cache — no Redis required.
+redis_url: "redis://localhost:6379/0"
+
+cache:
+  enabled: true
+  ttl_seconds: 3600
+
+# ---------------------------------------------------------------------------
+# Providers (adapters). `mock` is always available even if omitted here.
+# Upstream secrets are read from env vars via `api_key_env` so they never need
+# to be committed.
+# ---------------------------------------------------------------------------
+providers:
+  mock:
+    type: mock
+
+  openai:
+    type: openai
+    base_url: "https://api.openai.com/v1"
+    api_key_env: OPENAI_API_KEY
+
+  anthropic:
+    type: anthropic
+    base_url: "https://api.anthropic.com/v1"
+    api_key_env: ANTHROPIC_API_KEY
+
+  ollama:
+    type: ollama
+    base_url: "http://localhost:11434/v1"
+
+# ---------------------------------------------------------------------------
+# Routing table: client-facing `model` -> provider + upstream model name.
+# `fallback` (optional) names another route to retry with on provider error.
+# ---------------------------------------------------------------------------
+routing:
+  # Built-in offline models (always present).
+  mock-echo:
+    provider: mock
+    upstream_model: mock-echo
+  mock-cheap:
+    provider: mock
+    upstream_model: mock-cheap
+
+  # Real models, addressed by friendly aliases.
+  gpt-4o:
+    provider: openai
+    upstream_model: gpt-4o
+    fallback: claude-sonnet
+
+  claude-opus:
+    provider: anthropic
+    upstream_model: claude-3-opus-20240229
+
+  claude-sonnet:
+    provider: anthropic
+    upstream_model: claude-3-5-sonnet-20241022
+
+  claude-haiku:
+    provider: anthropic
+    upstream_model: claude-3-5-haiku-20241022
+
+  llama-local:
+    provider: ollama
+    upstream_model: llama3.1
+
+# ---------------------------------------------------------------------------
+# Virtual API keys. Clients authenticate with `Authorization: Bearer <key>`.
+# `allowed_models: []` (or omitted) means "all routed models".
+# Budgets: max_usd and/or max_tokens — a request that would exceed either is
+# rejected with HTTP 402.
+# ---------------------------------------------------------------------------
+keys:
+  - key: "sk-gw-dev"
+    name: dev
+    allowed_models: []          # all models
+    max_usd: 10.0
+    cache_enabled: true
+
+  - key: "sk-gw-cheap-only"
+    name: cheap-tier
+    allowed_models: ["mock-cheap", "claude-haiku"]
+    max_usd: 1.0
+    max_tokens: 500000
+    cache_enabled: true

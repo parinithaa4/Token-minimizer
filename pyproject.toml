@@ -1,0 +1,63 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "llm-gateway"
+version = "0.1.0"
+description = "Token-frugal, self-hostable OpenAI-compatible LLM gateway with honest cost accounting and built-in JTF savings"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Maxim Chumakov" }]
+keywords = ["llm", "gateway", "proxy", "openai", "anthropic", "tokens", "cost", "jtf"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Framework :: FastAPI",
+    "Topic :: Internet :: Proxy Servers",
+]
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "httpx>=0.26",
+    "pydantic>=2.5",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+redis = ["redis>=5.0"]
+tiktoken = ["tiktoken>=0.5"]
+dev = [
+    "pytest>=7.4",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.3",
+    "httpx>=0.26",
+]
+
+[project.scripts]
+llm-gateway = "llm_gateway.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/k1y0miiii/llm-gateway"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/llm_gateway"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/llm_gateway/_vendor/jtf/LICENSE" = "llm_gateway/_vendor/jtf/LICENSE"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+extend-exclude = ["_ref", "src/llm_gateway/_vendor"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+ignore = ["B008"]  # FastAPI uses function calls (Depends/Header) in defaults
