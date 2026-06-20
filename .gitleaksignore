@@ -1,0 +1,7 @@
+# False positives: "sk-gw-dev" is the documented zero-config dev key for the
+# gateway's built-in MOCK provider, shown in README curl/SDK examples.
+# It is not a real upstream (OpenAI/Anthropic) credential. Safe to publish.
+8490f541e17463f62c4c73db44fa6e083bff9310:README.md:curl-auth-header:146
+8490f541e17463f62c4c73db44fa6e083bff9310:README.ru.md:curl-auth-header:134
+d61ec6911af3563d0f15f342ddc6b0900b70b9ff:README.ru.md:curl-auth-header:94
+d61ec6911af3563d0f15f342ddc6b0900b70b9ff:README.md:curl-auth-header:92
