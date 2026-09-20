@@ -1,0 +1,33 @@
+database_url: "sqlite:///./gateway.db"
+
+cache:
+  enabled: true
+  ttl_seconds: 3600
+
+providers:
+  mock:
+    type: mock
+
+  ollama:
+    type: ollama
+    base_url: "http://localhost:11434/v1"
+
+routing:
+  mock-echo:
+    provider: mock
+    upstream_model: mock-echo
+
+  qwen-local:
+    provider: ollama
+    upstream_model: qwen3:8b
+
+  llama-local:
+    provider: ollama
+    upstream_model: llama3.1:8b
+
+keys:
+  - key: "sk-gw-dev"
+    name: dev
+    allowed_models: []
+    max_usd: 10.0
+    cache_enabled: true
