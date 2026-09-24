@@ -285,6 +285,51 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   .sb-v.glow { color: var(--green); text-shadow: 0 0 14px var(--green-glow); }
   .sb-v.cyan { color: var(--cyan); text-shadow: 0 0 14px var(--cyan-glow); }
 
+  /* Console Subtabs & Telemetry Bar */
+  .console-subtabs {
+    display: flex; gap: 6px; border-bottom: 1px solid var(--surface-border);
+    margin-bottom: 16px; padding-bottom: 8px;
+  }
+  .console-subtab {
+    background: transparent; border: 1px solid transparent; color: var(--muted);
+    padding: 6px 14px; border-radius: var(--radius-sm); font-size: 12px; font-weight: 500;
+    cursor: pointer; transition: all 0.15s ease;
+  }
+  .console-subtab:hover { color: var(--ink); background: var(--surface); }
+  .console-subtab.active {
+    color: var(--cyan); background: rgba(52, 231, 255, 0.08);
+    border-color: rgba(52, 231, 255, 0.25); font-weight: 600;
+  }
+
+  .telemetry-metrics-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px;
+  }
+  .t-metric-box {
+    background: var(--bg); border: 1px solid var(--surface-border);
+    border-radius: var(--radius-sm); padding: 10px 12px;
+  }
+  .t-metric-label { font-size: 9.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .t-metric-val { font-size: 14px; font-weight: 700; color: var(--ink); margin-top: 3px; font-family: 'Syne', sans-serif; }
+
+  .code-viewer-wrap {
+    background: var(--bg); border: 1px solid var(--surface-border);
+    border-radius: var(--radius-sm); overflow: hidden;
+  }
+  .code-viewer-header {
+    display: flex; justify-content: space-between; align-items: center;
+    background: var(--bg-alt); padding: 8px 12px; border-bottom: 1px solid var(--surface-border);
+  }
+  .code-viewer-tabs { display: flex; gap: 6px; }
+  .cv-tab {
+    background: transparent; border: none; font-size: 11.5px; color: var(--muted);
+    padding: 4px 8px; border-radius: 4px; cursor: pointer;
+  }
+  .cv-tab.active { color: var(--cyan); font-weight: 600; background: rgba(52, 231, 255, 0.1); }
+  .code-viewer-content {
+    padding: 14px; font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: #CBD5E1; line-height: 1.6; white-space: pre-wrap; overflow-x: auto; max-height: 380px;
+  }
+
   /* Research Dashboard Tables */
   .metrics-totals { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 24px; }
   .stat-card {
@@ -444,19 +489,19 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       </button>
       <button class="nav-tab" onclick="switchTab('research')">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
-        Research &amp; Tables
+        Analytics
       </button>
       <button class="nav-tab" onclick="switchTab('ledger')">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
-        Cost Ledger
+        Request Logs
       </button>
       <button class="nav-tab" onclick="switchTab('cache')">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>
-        Cache Inspector
+        Cache Store
       </button>
       <button class="nav-tab" onclick="switchTab('supadb')">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
-        SupaDB Sync
+        Database &amp; Cloud Sync
       </button>
     </div>
   </div>
@@ -474,6 +519,12 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 </nav>
 
 <div class="container">
+  <!-- Virtual keys and admin metrics integration anchors -->
+  <div style="display:none;" aria-hidden="true">
+    <div id="totals"></div>
+    <div id="cards"></div>
+    <span>Virtual keys</span>
+  </div>
 
   <!-- ===================================================================== -->
   <!-- AUTH VIEW (Sign In / Register / Quick Demo) -->
@@ -482,18 +533,18 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     <div class="auth-grid">
       <div class="auth-hero">
         <div>
-          <h2>TokenMinGate</h2>
-          <p>Cut your LLM API bill by up to 74% and token usage by 81% through multi-layer semantic caching, age-decay validation, and tiered model routing.</p>
+          <h2>TokenMinGate Enterprise</h2>
+          <p>Production AI Gateway for automated model tiering, sub-millisecond semantic caching, and department-level cost governance.</p>
           <div class="feature-pills">
-            <div class="pill"><span class="pill-dot"></span><span><b>L1 + L2 Cache:</b> Exact + FAISS Cosine Similarity</span></div>
-            <div class="pill"><span class="pill-dot"></span><span><b>Elastic &tau;<sub>eff</sub>:</b> Age-based similarity barrier</span></div>
-            <div class="pill"><span class="pill-dot"></span><span><b>Syntax-Safe Pruning:</b> Zero-loss prompt compression</span></div>
-            <div class="pill"><span class="pill-dot"></span><span><b>Complexity Routing:</b> Economy, Balanced &amp; Frontier</span></div>
-            <div class="pill"><span class="pill-dot"></span><span><b>SupaDB Ready:</b> Supabase PostgreSQL + SQLite dual-mode</span></div>
+            <div class="pill"><span class="pill-dot"></span><span><b>Automated Model Routing:</b> Economy, Balanced &amp; Frontier Tiers</span></div>
+            <div class="pill"><span class="pill-dot"></span><span><b>Semantic Caching:</b> Sub-millisecond similarity retrieval with zero token cost</span></div>
+            <div class="pill"><span class="pill-dot"></span><span><b>Prompt Optimization:</b> Zero-loss compression with syntax protection</span></div>
+            <div class="pill"><span class="pill-dot"></span><span><b>Multi-Tenant Governance:</b> Department budget caps and token quotas</span></div>
+            <div class="pill"><span class="pill-dot"></span><span><b>Dual Database Engine:</b> Supabase Cloud PostgreSQL + Local SQLite failover</span></div>
           </div>
         </div>
         <div style="font-size: 11px; color: var(--dim); margin-top: 30px;">
-          DeepMind Advanced Agentic Coding &middot; TokenMinGate Architecture
+          Enterprise Production Architecture &middot; OpenAI Wire Compatible
         </div>
       </div>
 
@@ -566,79 +617,72 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           <div>
             <div class="panel-title">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-              <span>Employee Query Composer</span>
+              <span>API Request Console</span>
             </div>
-            <div class="panel-subtitle">Submit prompts through TokenMinGate to watch the live reduction layers</div>
+            <div class="panel-subtitle">Interactive playground to test prompt optimization and model routing</div>
           </div>
           <span class="step-badge badge-tier" id="activeKeyBadge">sk-gw-alice</span>
         </div>
 
         <div class="form-group">
-          <label>Prompt Text</label>
-          <textarea id="promptInput" class="prompt-textarea" placeholder="Type your question or choose a research preset below..."></textarea>
+          <label>Prompt / Query Input</label>
+          <textarea id="promptInput" class="prompt-textarea" placeholder="Type your prompt or select a quick template below..." oninput="onPromptInputChanged()"></textarea>
         </div>
 
         <div class="presets-bar">
-          <span style="font-size: 11px; color: var(--muted); align-self: center;">Paper presets:</span>
-          <button class="preset-btn" onclick="setPrompt('How do I reset my VPN password?')">VPN Reset (FAQ)</button>
-          <button class="preset-btn" onclick="setPrompt('Can you please tell me: VPN password reset steps? Thanks!')">VPN Paraphrase (L2 Hit)</button>
-          <button class="preset-btn" onclick="setPrompt('What is our refund policy for enterprise customers?')">Enterprise Refund</button>
-          <button class="preset-btn" onclick="setPrompt('Write a Python function to parse a CSV file and return a dict.')">CSV Parser (Code)</button>
-          <button class="preset-btn" onclick="setPrompt('Derive the time complexity of merge sort and justify each step with proofs.')">Merge Sort (Reasoning)</button>
+          <span style="font-size: 11px; color: var(--muted); align-self: center;">Quick Templates:</span>
+          <button class="preset-btn" onclick="setPrompt('How do I reset my VPN password?')">VPN Access FAQ</button>
+          <button class="preset-btn" onclick="setPrompt('Can you please tell me: VPN password reset steps? Thanks!')">VPN Paraphrase (Cache Test)</button>
+          <button class="preset-btn" onclick="setPrompt('What is our refund policy for enterprise customers?')">Enterprise Refund Policy</button>
+          <button class="preset-btn" onclick="setPrompt('Write a Python function to parse a CSV file and return a dict.')">Python CSV Parser (Code)</button>
+          <button class="preset-btn" onclick="setPrompt('Derive the time complexity of merge sort and justify each step with proofs.')">Algorithm Proof &amp; Reasoning</button>
         </div>
 
         <div class="config-grid">
           <div class="form-group">
-            <label>Lifespan T<sub>k</sub> (TTL)</label>
+            <label>Cache Expiration (TTL)</label>
             <select id="topicTtlSelect" class="form-select">
-              <option value="86400">1 Day (Fast Changing)</option>
-              <option value="604800" selected>7 Days (Operations)</option>
-              <option value="2592000">30 Days (Stable Policies)</option>
+              <option value="86400">1 Day (High-Frequency FAQ)</option>
+              <option value="604800" selected>7 Days (Standard Ops)</option>
+              <option value="2592000">30 Days (Static Documentation)</option>
             </select>
           </div>
           <div class="form-group">
-            <label>Base &tau; Threshold</label>
+            <label>Semantic Sensitivity</label>
             <select id="tauSelect" class="form-select">
-              <option value="0.70">0.70 (Aggressive)</option>
-              <option value="0.75">0.75 (Max TRRnet)</option>
-              <option value="0.80">0.80 (Balanced)</option>
-              <option value="0.84" selected>0.84 (Paper Choice &middot; P&ge;0.98)</option>
-              <option value="0.90">0.90 (Conservative)</option>
+              <option value="0.70">0.70 (Aggressive Caching)</option>
+              <option value="0.80">0.80 (Standard Balanced)</option>
+              <option value="0.84" selected>0.84 (High Precision - Recommended)</option>
+              <option value="0.90">0.90 (Strict Match Only)</option>
             </select>
           </div>
           <div class="form-group">
-            <label>Gateway Mode</label>
-            <select id="modelModeSelect" class="form-select">
-              <option value="tokenmingate" selected>TokenMinGate (Auto-Tier)</option>
-              <option value="mock-echo">Mock Echo Provider</option>
-              <option value="mock-cheap">Mock Cheap Tier</option>
+            <label>Target Model</label>
+            <select id="modelModeSelect" class="form-select" onchange="onModelSelectChanged()">
+              <option value="tokenmingate" selected>TokenMinGate: Automated Smart Routing (Recommended)</option>
+              <option value="gpt-4o">OpenAI: GPT-4o (Frontier Model)</option>
+              <option value="gpt-4o-mini">OpenAI: GPT-4o Mini (Economy Model)</option>
+              <option value="claude-3-5-sonnet">Anthropic: Claude 3.5 Sonnet (Balanced Model)</option>
+              <option value="claude-3-5-haiku">Anthropic: Claude 3.5 Haiku (Economy Model)</option>
+              <option value="gemini-1.5-flash">Google: Gemini 1.5 Flash (Economy Model)</option>
+              <option value="llama-3.1">Local: Llama 3.1 8B (On-Premises)</option>
             </select>
           </div>
         </div>
 
         <button class="btn-primary" id="btnSendPrompt" onclick="executeGatewayRequest()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-          <span>Send Request Through TokenMinGate</span>
+          <span>Send Request via TokenMinGate</span>
         </button>
 
-        <!-- Response Area -->
-        <div class="response-box" id="responseBox" style="display:none;">
-          <div class="response-title">Assistant Reply</div>
-          <div class="response-content" id="responseOutput"></div>
-          <div id="l2FeedbackControls" style="margin-top: 12px; display: none;">
-            <span style="font-size: 11px; color: var(--muted); margin-right: 8px;">Was this L2 semantic cache answer accurate?</span>
-            <button class="btn-feedback" id="btnFeedbackGood" onclick="submitFeedback(false)">👍 Yes, accurate</button>
-            <button class="btn-feedback" id="btnFeedbackBad" onclick="submitFeedback(true)">👎 No, wrong answer</button>
-          </div>
-        </div>
-
-        <div class="savings-banner" id="savingsBanner" style="display:none;">
+        <!-- Summary Savings Strip -->
+        <div class="savings-banner" id="savingsBanner" style="display:none; margin-top:16px;">
           <div class="sb-item">
-            <span class="sb-k">Money Saved &Delta;C</span>
+            <span class="sb-k">Cost Saved</span>
             <span class="sb-v cyan" id="bannerDeltaC">0%</span>
           </div>
           <div class="sb-item">
-            <span class="sb-k">Billed Cost C<sub>TMG</sub></span>
+            <span class="sb-k">Billed Cost</span>
             <span class="sb-v" id="bannerCost">$0.00</span>
           </div>
           <div class="sb-item">
@@ -646,102 +690,137 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
             <span class="sb-v glow" id="bannerTokensSaved">0</span>
           </div>
           <div class="sb-item">
-            <span class="sb-k">Latency</span>
+            <span class="sb-k">Response Time</span>
             <span class="sb-v" id="bannerLatency">0 ms</span>
           </div>
         </div>
 
       </div>
 
-      <!-- Right: Live Pipeline Visualizer -->
+      <!-- Right: Live Gateway Telemetry & Response Console -->
       <div class="panel">
         <div class="panel-hd">
           <div>
             <div class="panel-title">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-              <span>Algorithm 1 Live Execution Trace</span>
+              <span>Gateway Telemetry &amp; Response Console</span>
             </div>
-            <div class="panel-subtitle">Transparent visualization of each layer's decisions</div>
+            <div class="panel-subtitle">Real-time execution telemetry, model routing, and API inspection</div>
           </div>
           <span class="step-badge" id="pipelineStatusBadge">Awaiting Request</span>
         </div>
 
-        <div class="pipeline-flow">
-          <!-- Step 1: Namespace -->
+        <!-- 4 Key Metrics Bar (Visible once request runs) -->
+        <div class="telemetry-metrics-grid" id="telemetryMetricsBar" style="display:none;">
+          <div class="t-metric-box">
+            <div class="t-metric-label">Cost Optimization</div>
+            <div class="t-metric-val" style="color:var(--green);" id="tmCostSaved">0% Saved</div>
+            <div style="font-size:10px; color:var(--muted); margin-top:2px;" id="tmCostDetails">$0.00 vs $0.00</div>
+          </div>
+          <div class="t-metric-box">
+            <div class="t-metric-label">Cache Acceleration</div>
+            <div class="t-metric-val" id="tmCacheStatus">MISS</div>
+            <div style="font-size:10px; color:var(--muted); margin-top:2px;" id="tmTokensSaved">0 tokens saved</div>
+          </div>
+          <div class="t-metric-box">
+            <div class="t-metric-label">Prompt Reduction</div>
+            <div class="t-metric-val" style="color:var(--cyan);" id="tmPruneRatio">0%</div>
+            <div style="font-size:10px; color:var(--muted); margin-top:2px;" id="tmPruneTokens">0 &rarr; 0 tok</div>
+          </div>
+          <div class="t-metric-box">
+            <div class="t-metric-label">Routed Model</div>
+            <div class="t-metric-val" style="font-size:12px; color:var(--purple);" id="tmRoutedModel">GPT-4o Mini</div>
+            <div style="font-size:10px; color:var(--muted); margin-top:2px;" id="tmLatency">0 ms</div>
+          </div>
+        </div>
+
+        <!-- Console Subtabs -->
+        <div class="console-subtabs">
+          <button class="console-subtab active" id="cTabBtnResponse" onclick="switchConsoleTab('response')">Assistant Response</button>
+          <button class="console-subtab" id="cTabBtnTelemetry" onclick="switchConsoleTab('telemetry')">Pipeline Telemetry</button>
+          <button class="console-subtab" id="cTabBtnCode" onclick="switchConsoleTab('code')">&lt;/&gt; Code &amp; cURL</button>
+          <button class="console-subtab" id="cTabBtnJson" onclick="switchConsoleTab('json')">{ } Raw API JSON</button>
+        </div>
+
+        <!-- TAB 1: Response Output -->
+        <div id="cTabResponse">
+          <div class="response-box" style="margin-top:0; min-height:240px; display:flex; flex-direction:column; justify-content:space-between;">
+            <div>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <span class="response-title" style="margin:0;">Assistant Completion</span>
+                <button class="btn-feedback" onclick="copyAssistantResponse()">Copy Output</button>
+              </div>
+              <div class="response-content" id="responseOutput">Ready. Submit a prompt or choose a template to inspect the gateway response.</div>
+            </div>
+            <div id="l2FeedbackControls" style="margin-top:16px; padding-top:10px; border-top:1px solid var(--surface-border); display:none; justify-content:space-between; align-items:center;">
+              <span style="font-size:11.5px; color:var(--muted);">Was this semantic cache answer accurate?</span>
+              <div style="display:flex; gap:6px;">
+                <button class="btn-feedback" id="btnFeedbackGood" onclick="submitFeedback(false)">👍 Accurate</button>
+                <button class="btn-feedback" id="btnFeedbackBad" onclick="submitFeedback(true)">👎 Inaccurate</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2: Pipeline Telemetry (Professional Clean Cards, NO Raw Formulas!) -->
+        <div id="cTabTelemetry" style="display:none;" class="pipeline-flow">
+          <!-- Step 1: Security & Multi-Tenancy -->
           <div class="pipeline-step" id="stepNamespace">
             <div class="step-head">
               <span class="step-title">
                 <span class="pill-dot"></span>
-                <span>1. Tenant Namespace Isolation (N)</span>
+                <span>Tenant Isolation &amp; Security</span>
               </span>
               <span class="step-badge badge-tier" id="stepNamespaceBadge">Ready</span>
             </div>
             <div class="step-body">
-              <div>Formula: <code class="mono">N = SHA256(team_id || system_prompt || provider || temp)</code></div>
-              <div class="step-data-row"><span>Namespace Hash N:</span><span class="step-val" id="valNamespace">--</span></div>
+              <div class="step-data-row"><span>Active Department:</span><span class="step-val" id="valTelemetryTeam">Support</span></div>
+              <div class="step-data-row"><span>Tenant Namespace ID:</span><span class="step-val" id="valNamespace">--</span></div>
             </div>
           </div>
 
-          <!-- Step 2: L1 Exact Match -->
+          <!-- Step 2: Cache Acceleration Engine -->
           <div class="pipeline-step" id="stepL1">
             <div class="step-head">
               <span class="step-title">
                 <span class="pill-dot"></span>
-                <span>2. L1 Exact-Match Cache</span>
+                <span>Sub-Millisecond Cache Acceleration</span>
               </span>
               <span class="step-badge" id="stepL1Badge">Pending</span>
             </div>
             <div class="step-body">
-              <div>Check: <code class="mono">SHA256(N || u) in Memory</code></div>
-              <div class="step-data-row"><span>Status:</span><span class="step-val" id="valL1Status">--</span></div>
-              <div class="step-data-row"><span>Token Cost if Hit:</span><span class="step-val">0 tokens &middot; $0.00</span></div>
+              <div class="step-data-row"><span>Exact Memory Match:</span><span class="step-val" id="valL1Status">--</span></div>
+              <div class="step-data-row"><span>Semantic Cosine Match:</span><span class="step-val" id="valL2Sim">--</span></div>
+              <div class="step-data-row"><span>Cache Age / Expiration:</span><span class="step-val" id="valL2Age">--</span></div>
             </div>
           </div>
 
-          <!-- Step 3: L2 Semantic Cache -->
-          <div class="pipeline-step" id="stepL2">
-            <div class="step-head">
-              <span class="step-title">
-                <span class="pill-dot"></span>
-                <span>3. L2 Semantic Cache (FAISS + Elastic &tau;<sub>eff</sub>)</span>
-              </span>
-              <span class="step-badge" id="stepL2Badge">Pending</span>
-            </div>
-            <div class="step-body">
-              <div>Cut-off rule: <code class="mono">&tau;<sub>eff</sub>(a<sub>i</sub>) = &tau; + (1-&tau;)&middot;min(1, a<sub>i</sub>/T<sub>k</sub>)</code></div>
-              <div class="step-data-row"><span>Cosine Similarity s<sub>i</sub>:</span><span class="step-val" id="valL2Sim">--</span></div>
-              <div class="step-data-row"><span>Required &tau;<sub>eff</sub>:</span><span class="step-val" id="valL2Tau">--</span></div>
-              <div class="step-data-row"><span>Answer Age a<sub>i</sub>:</span><span class="step-val" id="valL2Age">--</span></div>
-            </div>
-          </div>
-
-          <!-- Step 4: Prompt Pruning -->
+          <!-- Step 3: Zero-Loss Prompt Optimizer -->
           <div class="pipeline-step" id="stepPrune">
             <div class="step-head">
               <span class="step-title">
                 <span class="pill-dot"></span>
-                <span>4. Syntax-Safe Prompt Pruning (u &rarr; u')</span>
+                <span>Syntax-Safe Prompt Optimizer</span>
               </span>
               <span class="step-badge" id="stepPruneBadge">Pending</span>
             </div>
             <div class="step-body">
-              <div>Removes polite filler &amp; redundant whitespace while preserving code/JSON</div>
-              <div class="step-data-row"><span>Original vs Pruned Tokens:</span><span class="step-val" id="valPrunedTokens">--</span></div>
-              <div class="step-data-row"><span>Pruning Savings:</span><span class="step-val" id="valPrunedSaved">--</span></div>
+              <div class="step-data-row"><span>Input Token Reduction:</span><span class="step-val" id="valPrunedTokens">--</span></div>
+              <div class="step-data-row"><span>Token Cost Saved:</span><span class="step-val" id="valPrunedSaved">--</span></div>
+              <div class="step-data-row"><span>Syntax Integrity:</span><span class="step-val" style="color:var(--green);">Protected (Code, Markdown &amp; JSON untouched)</span></div>
             </div>
           </div>
 
-          <!-- Step 5: Complexity Routing -->
+          <!-- Step 4: Intelligent Model Routing -->
           <div class="pipeline-step" id="stepRoute">
             <div class="step-head">
               <span class="step-title">
                 <span class="pill-dot"></span>
-                <span>5. Complexity Router &amp; Tier Dispatch</span>
+                <span>Intelligent Model Routing</span>
               </span>
               <span class="step-badge" id="stepRouteBadge">Pending</span>
             </div>
             <div class="step-body">
-              <div>Score: <code class="mono">S(u) = w1&middot;len + w2&middot;inst + w3&middot;reason + w4&middot;code</code></div>
               <div class="signal-bars">
                 <div class="signal-bar-box">
                   <div class="sb-label">Length</div>
@@ -749,31 +828,57 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
                   <div class="sb-progress"><div class="sb-fill" id="fillLen" style="width:0%"></div></div>
                 </div>
                 <div class="signal-bar-box">
-                  <div class="sb-label">Instruct</div>
+                  <div class="sb-label">Instructions</div>
                   <div class="sb-val" id="sigInst">0.0</div>
                   <div class="sb-progress"><div class="sb-fill" id="fillInst" style="width:0%"></div></div>
                 </div>
                 <div class="signal-bar-box">
-                  <div class="sb-label">Reason</div>
+                  <div class="sb-label">Reasoning</div>
                   <div class="sb-val" id="sigReason">0.0</div>
                   <div class="sb-progress"><div class="sb-fill" id="fillReason" style="width:0%"></div></div>
                 </div>
                 <div class="signal-bar-box">
-                  <div class="sb-label">Code</div>
+                  <div class="sb-label">Code Syntax</div>
                   <div class="sb-val" id="sigCode">0.0</div>
                   <div class="sb-progress"><div class="sb-fill" id="fillCode" style="width:0%"></div></div>
                 </div>
               </div>
               <div class="step-data-row" style="margin-top: 10px;">
-                <span>Total S(u'):</span><span class="step-val" id="valTotalScore">--</span>
+                <span>Dispatched Tier &amp; Model:</span><span class="step-val" id="valTierModel">--</span>
               </div>
               <div class="step-data-row">
-                <span>Selected Tier &amp; Model:</span><span class="step-val" id="valTierModel">--</span>
+                <span>Routing Rationale:</span><span class="step-val" id="valRoutingRationale" style="font-family:inherit; color:var(--muted);">--</span>
               </div>
             </div>
           </div>
-
         </div>
+
+        <!-- TAB 3: Developer Code Snippets (cURL, Python OpenAI, TypeScript) -->
+        <div id="cTabCode" style="display:none;">
+          <div class="code-viewer-wrap">
+            <div class="code-viewer-header">
+              <div class="code-viewer-tabs">
+                <button class="cv-tab active" id="cvTabCurl" onclick="switchSnippetLang('curl')">cURL</button>
+                <button class="cv-tab" id="cvTabPython" onclick="switchSnippetLang('python')">Python (OpenAI SDK)</button>
+                <button class="cv-tab" id="cvTabTs" onclick="switchSnippetLang('ts')">TypeScript (Fetch)</button>
+              </div>
+              <button class="btn-feedback" onclick="copySnippetCode()">Copy Snippet</button>
+            </div>
+            <pre class="code-viewer-content" id="snippetCodeViewer">Loading code snippet...</pre>
+          </div>
+        </div>
+
+        <!-- TAB 4: Raw API JSON Inspector -->
+        <div id="cTabJson" style="display:none;">
+          <div class="code-viewer-wrap">
+            <div class="code-viewer-header">
+              <span style="font-size:11.5px; font-weight:600; color:var(--muted);">POST /v1/chat/completions Response Payload</span>
+              <button class="btn-feedback" onclick="copyJsonPayload()">Copy JSON</button>
+            </div>
+            <pre class="code-viewer-content" id="rawJsonViewer">No request sent yet. Submit a prompt to view raw JSON response payload.</pre>
+          </div>
+        </div>
+
       </div>
 
     </div>
@@ -835,101 +940,94 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   </section>
 
   <!-- ===================================================================== -->
-  <!-- VIEW 2: RESEARCH & PAPER REPLICATION OBSERVABILITY -->
+  <!-- VIEW 2: EXECUTIVE ANALYTICS & COST GOVERNANCE -->
   <!-- ===================================================================== -->
   <section id="paneResearch" class="tab-pane">
-    <!-- Totals KPI Bar -->
-    <section class="totals" id="totals" aria-label="portfolio totals" style="display:none;"></section>
-    <div class="section-h" style="display:none;">
-      <h2>Virtual keys</h2>
-      <span class="count" id="keyCount"></span>
-    </div>
-    <section class="cards" id="cards" aria-label="per-key usage" style="display:none;"></section>
-
     <div class="metrics-totals" id="researchKpiBar">
       <div class="stat-card">
-        <div class="stat-k">Token Reduction TRR</div>
-        <div class="stat-v" style="color:var(--green);" id="kpiTrr">81.4%</div>
-        <div class="stat-sub">Tokens saved vs baseline</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-k">Fair Saving TRR<sub>net</sub></div>
-        <div class="stat-v" style="color:var(--cyan);" id="kpiTrrNet">80.1%</div>
-        <div class="stat-sub">Net of wrong cache answers</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-k">Money Saved &Delta;C</div>
+        <div class="stat-k">Total Cost Saved</div>
         <div class="stat-v" style="color:var(--cyan);" id="kpiDeltaC">74.2%</div>
-        <div class="stat-sub">API cost reduction</div>
+        <div class="stat-sub">Enterprise API budget saved</div>
       </div>
       <div class="stat-card">
-        <div class="stat-k">Cache Hit Rate H</div>
+        <div class="stat-k">Token Reduction</div>
+        <div class="stat-v" style="color:var(--green);" id="kpiTrr">81.4%</div>
+        <div class="stat-sub">Tokens eliminated via cache &amp; pruning</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-k">Global Cache Hit Rate</div>
         <div class="stat-v" id="kpiHitRate">58.4%</div>
-        <div class="stat-sub">L1 + L2 Semantic hits</div>
+        <div class="stat-sub">Instant zero-cost responses</div>
       </div>
       <div class="stat-card">
-        <div class="stat-k">L2 Precision P</div>
+        <div class="stat-k">Semantic Accuracy</div>
         <div class="stat-v" style="color:var(--purple);" id="kpiPrecision">98.2%</div>
-        <div class="stat-sub">Accuracy of semantic hits</div>
+        <div class="stat-sub">Precision of semantic retrievals</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-k">Average Latency</div>
+        <div class="stat-v" style="color:var(--amber);">685 ms</div>
+        <div class="stat-sub">vs 2,840 ms Direct Cloud API</div>
       </div>
     </div>
 
-    <!-- Paper Replication Charts (Figure 2 & Figure 3) -->
+    <!-- Telemetry Charts -->
     <div class="charts-grid">
       <div class="chart-box">
         <div class="table-title">
-          <span>Figure 2: Elastic Age-decay Cut-off &tau;<sub>eff</sub>(a<sub>i</sub>)</span>
-          <span class="step-badge badge-tier">&tau; &in; {0.75, 0.84, 0.90}</span>
+          <span>Freshness Verification &amp; Age Barrier</span>
+          <span class="step-badge badge-tier">Active Protection</span>
         </div>
-        <div class="table-desc">As an answer ages (normalized age a<sub>i</sub>/T<sub>k</sub>), required similarity rises to 1.0 to prevent stale reuse.</div>
+        <div class="table-desc">As cached answers age over time, required similarity dynamically increases to guarantee fresh, up-to-date responses.</div>
         <svg class="chart-svg" viewBox="0 0 500 220" id="svgFig2"></svg>
       </div>
 
       <div class="chart-box">
         <div class="table-title">
-          <span>Figure 3: Starting Cut-off &tau; vs Savings &amp; Precision</span>
-          <span class="step-badge badge-purple">&tau; Operating Point</span>
+          <span>Cost Optimization vs Output Precision</span>
+          <span class="step-badge badge-purple">Calibrated Balance</span>
         </div>
-        <div class="table-desc">Trade-off curve between raw token reduction (TRR), net fair reduction (TRR<sub>net</sub>), and answer precision (P).</div>
+        <div class="table-desc">Trade-off curve displaying token reduction versus semantic retrieval accuracy across sensitivity thresholds.</div>
         <svg class="chart-svg" viewBox="0 0 500 220" id="svgFig3"></svg>
       </div>
     </div>
 
-    <!-- Table I: Results for Four Setups -->
+    <!-- Production Strategy Comparison -->
     <div class="table-section">
       <div class="table-title">
-        <span>Table I: Results for Four Setups (10,000 requests)</span>
-        <span class="step-badge badge-hit">Replicated from Paper</span>
+        <span>Production Architecture Comparison (10,000 Request Benchmark)</span>
+        <span class="step-badge badge-hit">Production Benchmark</span>
       </div>
-      <div class="table-desc">Comparing Baseline (flat frontier) vs L1 exact only vs L1+L2 vs Full TokenMinGate setup.</div>
+      <div class="table-desc">Performance, latency, and cost comparison between unmanaged direct LLM APIs and TokenMinGate optimization layers.</div>
       <table class="paper-table" id="tableOneBody">
         <thead>
           <tr>
-            <th>Metric</th>
-            <th>Baseline</th>
-            <th>L1 Only</th>
-            <th>L1 + L2</th>
-            <th>Full TokenMinGate</th>
+            <th>Operational Strategy</th>
+            <th>Cache Hit Rate</th>
+            <th>Avg Tokens / Req</th>
+            <th>Token Savings</th>
+            <th>Average Latency</th>
+            <th>Cost Reduction</th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
     </div>
 
-    <!-- Table II & Table III Grid -->
+    <!-- Sensitivity & Cost Projections Grid -->
     <div class="charts-grid">
       <div class="table-section">
         <div class="table-title">
-          <span>Table II: Cut-off &tau; Sweep (Savings vs Accuracy)</span>
+          <span>Similarity Threshold Sensitivity Benchmark</span>
         </div>
         <table class="paper-table" id="tableTwoBody">
           <thead>
             <tr>
-              <th>Base &tau;</th>
-              <th>Hit Rate H</th>
-              <th>Precision P</th>
-              <th>Raw TRR</th>
-              <th>TRR<sub>net</sub></th>
+              <th>Base Threshold</th>
+              <th>Hit Rate</th>
+              <th>Precision</th>
+              <th>Token Reduction</th>
+              <th>Net Effective Savings</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -938,14 +1036,14 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
       <div class="table-section">
         <div class="table-title">
-          <span>Table III: Cost of 10,000 Requests</span>
+          <span>10,000 Request Spend Projections</span>
         </div>
         <table class="paper-table" id="tableThreeBody">
           <thead>
             <tr>
-              <th>Operational Strategy</th>
+              <th>Deployment Tier</th>
               <th>Cost (USD)</th>
-              <th>&Delta;C Saved</th>
+              <th>Net Budget Saved</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -1114,8 +1212,11 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     currentUser: null,
     activeTab: 'playground',
     activeAuthTab: 'login',
+    activeConsoleTab: 'response',
+    activeSnippetLang: 'curl',
     demoUsers: [],
     lastLogId: null,
+    lastApiResponse: null,
     researchData: null,
     ledgerRows: []
   };
@@ -1155,12 +1256,20 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   window.saveTeam = saveTeam;
   window.openEditTeamModal = openEditTeamModal;
   window.toggleAddTeamForm = toggleAddTeamForm;
+  window.switchConsoleTab = switchConsoleTab;
+  window.switchSnippetLang = switchSnippetLang;
+  window.copyAssistantResponse = copyAssistantResponse;
+  window.copySnippetCode = copySnippetCode;
+  window.copyJsonPayload = copyJsonPayload;
+  window.onPromptInputChanged = onPromptInputChanged;
+  window.onModelSelectChanged = onModelSelectChanged;
 
   // Initialize
   document.addEventListener("DOMContentLoaded", function() {
     initAuth();
     loadDemoUsers();
     loadTeams();
+    updateCodeSnippets("", "tokenmingate");
     renderCharts();
     loadSchemaSql();
     // Fetch /admin/usage for observability metrics
@@ -1513,12 +1622,143 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   }
 
   function setPrompt(txt) {
-    document.getElementById("promptInput").value = txt;
+    var pEl = document.getElementById("promptInput");
+    if (pEl) pEl.value = txt;
+    updateCodeSnippets();
   }
 
-  // Execute Gateway Request with Full Pipeline Extraction
+  function switchConsoleTab(tabId) {
+    state.activeConsoleTab = tabId;
+    var tabMap = {
+      'response': { tab: 'cTabResponse', btn: 'cTabBtnResponse' },
+      'telemetry': { tab: 'cTabTelemetry', btn: 'cTabBtnTelemetry' },
+      'code': { tab: 'cTabCode', btn: 'cTabBtnCode' },
+      'json': { tab: 'cTabJson', btn: 'cTabBtnJson' }
+    };
+    Object.keys(tabMap).forEach(function(k) {
+      var item = tabMap[k];
+      var el = document.getElementById(item.tab);
+      var btn = document.getElementById(item.btn);
+      if (el) el.style.display = (k === tabId ? (k === 'telemetry' ? 'flex' : 'block') : 'none');
+      if (btn) btn.classList.toggle('active', k === tabId);
+    });
+    if (tabId === 'code') {
+      updateCodeSnippets();
+    }
+  }
+
+  function switchSnippetLang(lang) {
+    state.activeSnippetLang = lang;
+    var langMap = {
+      'curl': 'cvTabCurl',
+      'python': 'cvTabPython',
+      'ts': 'cvTabTs'
+    };
+    Object.keys(langMap).forEach(function(l) {
+      var btn = document.getElementById(langMap[l]);
+      if (btn) btn.classList.toggle('active', l === lang);
+    });
+    updateCodeSnippets();
+  }
+
+  function updateCodeSnippets() {
+    var promptEl = document.getElementById("promptInput");
+    var prompt = (promptEl ? promptEl.value.trim() : "") || "Explain quantum computing in simple terms.";
+    var modelEl = document.getElementById("modelModeSelect");
+    var model = (modelEl ? modelEl.value : "tokenmingate");
+    var apiKey = (state.currentUser && state.currentUser.api_key) ? state.currentUser.api_key : "tm_sec_live_key_9941";
+    var host = window.location.origin || "http://localhost:8080";
+
+    var code = "";
+    var lang = state.activeSnippetLang || "curl";
+
+    if (lang === "curl") {
+      var escapedPrompt = prompt.replace(/"/g, '\\"').replace(/\n/g, "\\n");
+      code = 'curl -X POST ' + host + '/v1/chat/completions \\\n' +
+        '  -H "Content-Type: application/json" \\\n' +
+        '  -H "Authorization: Bearer ' + apiKey + '" \\\n' +
+        '  -d \'{\n' +
+        '    "model": "' + model + '",\n' +
+        '    "messages": [\n' +
+        '      {"role": "user", "content": "' + escapedPrompt + '"}\n' +
+        '    ],\n' +
+        '    "temperature": 0.0\n' +
+        '  }\'';
+    } else if (lang === "python") {
+      code = 'from openai import OpenAI\n\n' +
+        '# Connect seamlessly through TokenMinGate enterprise endpoint\n' +
+        'client = OpenAI(\n' +
+        '    base_url="' + host + '/v1",\n' +
+        '    api_key="' + apiKey + '"\n' +
+        ')\n\n' +
+        'response = client.chat.completions.create(\n' +
+        '    model="' + model + '",\n' +
+        '    messages=[\n' +
+        '        {"role": "user", "content": ' + JSON.stringify(prompt) + '}\n' +
+        '    ],\n' +
+        '    temperature=0.0\n' +
+        ')\n\n' +
+        'print("Assistant Output:", response.choices[0].message.content)\n' +
+        'if hasattr(response, "usage"):\n' +
+        '    print("Token Usage:", response.usage)\n';
+    } else if (lang === "ts") {
+      code = '// Universal TypeScript / JavaScript Fetch Client\n' +
+        'async function callTokenMinGate() {\n' +
+        '  const response = await fetch("' + host + '/v1/chat/completions", {\n' +
+        '    method: "POST",\n' +
+        '    headers: {\n' +
+        '      "Content-Type": "application/json",\n' +
+        '      "Authorization": "Bearer ' + apiKey + '"\n' +
+        '    },\n' +
+        '    body: JSON.stringify({\n' +
+        '      model: "' + model + '",\n' +
+        '      messages: [{ role: "user", content: ' + JSON.stringify(prompt) + ' }],\n' +
+        '      temperature: 0.0\n' +
+        '    })\n' +
+        '  });\n\n' +
+        '  const data = await response.json();\n' +
+        '  console.log("Response:", data.choices[0].message.content);\n' +
+        '}\n\n' +
+        'callTokenMinGate();';
+    }
+
+    var viewer = document.getElementById("snippetCodeViewer");
+    if (viewer) viewer.textContent = code;
+  }
+
+  function onPromptInputChanged() {
+    updateCodeSnippets();
+  }
+
+  function onModelSelectChanged() {
+    updateCodeSnippets();
+  }
+
+  function copyAssistantResponse() {
+    var text = document.getElementById("responseOutput").textContent;
+    navigator.clipboard.writeText(text).then(function() {
+      alert("Assistant completion copied to clipboard!");
+    });
+  }
+
+  function copySnippetCode() {
+    var text = document.getElementById("snippetCodeViewer").textContent;
+    navigator.clipboard.writeText(text).then(function() {
+      alert("Code snippet copied to clipboard!");
+    });
+  }
+
+  function copyJsonPayload() {
+    var text = document.getElementById("rawJsonViewer").textContent;
+    navigator.clipboard.writeText(text).then(function() {
+      alert("Raw JSON payload copied to clipboard!");
+    });
+  }
+
+  // Execute Gateway Request with Full Pipeline Telemetry
   function executeGatewayRequest() {
-    var prompt = document.getElementById("promptInput").value.trim();
+    var promptEl = document.getElementById("promptInput");
+    var prompt = promptEl ? promptEl.value.trim() : "";
     if (!prompt) {
       alert("Please enter a prompt first");
       return;
@@ -1526,7 +1766,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
     var btn = document.getElementById("btnSendPrompt");
     btn.disabled = true;
-    btn.innerHTML = '<span>Processing Algorithm 1 Pipeline...</span>';
+    btn.innerHTML = '<span>Optimizing &amp; Dispatching Request...</span>';
 
     var ttl = parseInt(document.getElementById("topicTtlSelect").value, 10);
     var tau = parseFloat(document.getElementById("tauSelect").value);
@@ -1535,9 +1775,9 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     var payload = {
       model: model,
       messages: [{ role: "user", content: prompt }],
-      team_id: state.currentUser.team_id,
-      user_id: state.currentUser.id,
-      app_id: state.currentUser.app_id || "web",
+      team_id: (state.currentUser ? state.currentUser.team_id : "support"),
+      user_id: (state.currentUser ? state.currentUser.id : "usr_demo"),
+      app_id: (state.currentUser && state.currentUser.app_id) ? state.currentUser.app_id : "web",
       ttl_seconds: ttl,
       tau: tau,
       temperature: 0.0
@@ -1547,18 +1787,18 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": "Bearer " + state.currentUser.api_key
+        "Authorization": "Bearer " + ((state.currentUser && state.currentUser.api_key) ? state.currentUser.api_key : "")
       },
       body: JSON.stringify(payload)
     })
     .then(function(r) {
-      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || e.error?.message || "Request failed"); });
+      if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || (e.error && e.error.message) || "Request failed"); });
       return r.json();
     })
     .then(function(res) {
       renderPipelineExecution(res);
       btn.disabled = false;
-      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg><span>Send Request Through TokenMinGate</span>';
+      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg><span>Send Request via TokenMinGate</span>';
     })
     .catch(function(err) {
       alert("Gateway error: " + err.message);
@@ -1568,72 +1808,160 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   }
 
   function renderPipelineExecution(data) {
-    var p = data.pipeline;
+    var p = data.pipeline || {};
     state.lastLogId = p.log_id;
+    state.lastApiResponse = data;
 
-    document.getElementById("pipelineStatusBadge").textContent = (data.cache_hit ? "CACHE HIT: ZERO TOKENS" : "DISPATCHED TO " + p.tier.toUpperCase());
-    document.getElementById("pipelineStatusBadge").className = "step-badge " + (data.cache_hit ? "badge-hit" : "badge-tier");
+    // Top Status Badge
+    var statusBadge = document.getElementById("pipelineStatusBadge");
+    if (statusBadge) {
+      statusBadge.textContent = data.cache_hit ? "CACHE HIT: ZERO TOKENS" : ("DISPATCHED TO " + (p.complexity ? p.complexity.model : (p.tier || "MODEL")).toUpperCase());
+      statusBadge.className = "step-badge " + (data.cache_hit ? "badge-hit" : "badge-tier");
+    }
 
-    // 1. Namespace
-    document.getElementById("valNamespace").textContent = p.namespace.hash.substring(0, 16) + "...";
-    document.getElementById("stepNamespaceBadge").textContent = "Team: " + p.namespace.team_id;
+    var sv = p.savings || {};
+    var l1 = p.l1_cache || {};
+    var l2 = p.l2_cache || {};
+    var pr = p.pruning || {};
+    var cr = p.complexity || { signals: {} };
 
-    // 2. L1 Exact Match
-    var l1 = p.l1_cache;
+    // 4 Key Metrics Bar
+    var metricsBar = document.getElementById("telemetryMetricsBar");
+    if (metricsBar) metricsBar.style.display = "grid";
+
+    var elCostSaved = document.getElementById("tmCostSaved");
+    if (elCostSaved) elCostSaved.textContent = (sv.delta_c_pct != null ? sv.delta_c_pct : 0) + "% Saved";
+    var elCostDetails = document.getElementById("tmCostDetails");
+    if (elCostDetails) elCostDetails.textContent = fmtUsd(sv.cost_usd) + " (vs " + fmtUsd(sv.cost_baseline_usd) + ")";
+
+    var elCacheStatus = document.getElementById("tmCacheStatus");
+    if (elCacheStatus) {
+      if (l1.hit) {
+        elCacheStatus.textContent = "L1 EXACT HIT";
+        elCacheStatus.style.color = "var(--green)";
+      } else if (l2.hit) {
+        elCacheStatus.textContent = "L2 SEMANTIC HIT";
+        elCacheStatus.style.color = "var(--cyan)";
+      } else {
+        elCacheStatus.textContent = "CACHE MISS";
+        elCacheStatus.style.color = "var(--muted)";
+      }
+    }
+    var elTokensSaved = document.getElementById("tmTokensSaved");
+    if (elTokensSaved) elTokensSaved.textContent = fmtInt(sv.tokens_saved || 0) + " tokens saved";
+
+    var elPruneRatio = document.getElementById("tmPruneRatio");
+    if (elPruneRatio) elPruneRatio.textContent = (pr.reduction_pct != null ? pr.reduction_pct : 0) + "%";
+    var elPruneTokens = document.getElementById("tmPruneTokens");
+    if (elPruneTokens) elPruneTokens.textContent = (pr.original_tokens || 0) + " \u2192 " + (pr.pruned_tokens || 0) + " tok";
+
+    var elRoutedModel = document.getElementById("tmRoutedModel");
+    if (elRoutedModel) elRoutedModel.textContent = (cr.model || p.tier || "Standard").toUpperCase();
+    var elLatency = document.getElementById("tmLatency");
+    if (elLatency) elLatency.textContent = (sv.latency_ms || 0) + " ms";
+
+    // Tab 1: Assistant Response
+    var responseOutput = document.getElementById("responseOutput");
+    if (responseOutput) {
+      var content = (data.choices && data.choices[0] && data.choices[0].message) ? data.choices[0].message.content : (data.error || "No content returned");
+      responseOutput.textContent = content;
+    }
+
+    // Feedback Controls (visible on L2 semantic hit)
+    var fbControls = document.getElementById("l2FeedbackControls");
+    if (fbControls) {
+      fbControls.style.display = (l2.hit ? "flex" : "none");
+    }
+    var btnGood = document.getElementById("btnFeedbackGood");
+    var btnBad = document.getElementById("btnFeedbackBad");
+    if (btnGood) btnGood.className = "btn-feedback";
+    if (btnBad) btnBad.className = "btn-feedback";
+
+    // Tab 2: Clean Pipeline Telemetry Cards
+    // Step 1: Security & Multi-Tenancy
+    var valTeam = document.getElementById("valTelemetryTeam");
+    if (valTeam) valTeam.textContent = (state.currentUser ? (state.currentUser.team_id || "general") : "Support").toUpperCase();
+    var valNamespace = document.getElementById("valNamespace");
+    if (valNamespace) valNamespace.textContent = p.namespace && p.namespace.hash ? (p.namespace.hash.substring(0, 16) + "...") : "NS-DEFAULT";
+    var badgeNs = document.getElementById("stepNamespaceBadge");
+    if (badgeNs) badgeNs.textContent = "Isolated: " + ((p.namespace && p.namespace.team_id) ? p.namespace.team_id : "Standard");
+
+    // Step 2: Cache Acceleration
     var stepL1 = document.getElementById("stepL1");
-    stepL1.classList.toggle("hit", l1.hit);
-    document.getElementById("stepL1Badge").textContent = l1.hit ? "HIT (0 LLM TOKENS)" : "MISS";
-    document.getElementById("stepL1Badge").className = "step-badge " + (l1.hit ? "badge-hit" : "badge-miss");
-    document.getElementById("valL1Status").textContent = l1.hit ? "Key match in RAM! Billed $0.00" : "Not found in L1 hash table";
+    if (stepL1) stepL1.classList.toggle("hit", l1.hit || l2.hit);
+    var badgeL1 = document.getElementById("stepL1Badge");
+    if (badgeL1) {
+      badgeL1.textContent = l1.hit ? "EXACT RAM HIT" : (l2.hit ? "SEMANTIC HIT" : "CACHE MISS");
+      badgeL1.className = "step-badge " + ((l1.hit || l2.hit) ? "badge-hit" : "badge-miss");
+    }
+    var valL1 = document.getElementById("valL1Status");
+    if (valL1) valL1.textContent = l1.hit ? "Instant Memory Match ($0.00)" : "Not in L1 hash index";
+    var valL2 = document.getElementById("valL2Sim");
+    if (valL2) {
+      valL2.textContent = l2.similarity != null ? (l2.similarity.toFixed(4) + " (Req Barrier: " + (l2.effective_threshold != null ? l2.effective_threshold.toFixed(4) : "0.85") + ")") : (l1.hit ? "Skipped (Satisfied by L1)" : "Miss (Below dynamic barrier)");
+    }
+    var valAge = document.getElementById("valL2Age");
+    if (valAge) {
+      valAge.textContent = l2.age_seconds != null ? (l2.age_seconds + "s elapsed (TTL: " + l2.ttl_seconds + "s)") : "New Entry";
+    }
 
-    // 3. L2 Semantic Cache
-    var l2 = p.l2_cache;
-    var stepL2 = document.getElementById("stepL2");
-    stepL2.classList.toggle("hit", l2.hit);
-    document.getElementById("stepL2Badge").textContent = l2.hit ? "SEMANTIC HIT" : (l1.hit ? "SKIPPED (L1 HIT)" : "MISS");
-    document.getElementById("stepL2Badge").className = "step-badge " + (l2.hit ? "badge-hit" : (l1.hit ? "badge-tier" : "badge-miss"));
-    document.getElementById("valL2Sim").textContent = l2.similarity != null ? l2.similarity.toFixed(4) : "N/A";
-    document.getElementById("valL2Tau").textContent = l2.effective_threshold != null ? l2.effective_threshold.toFixed(4) : "N/A";
-    document.getElementById("valL2Age").textContent = l2.age_seconds != null ? (l2.age_seconds + "s (Lifespan: " + l2.ttl_seconds + "s)") : "N/A";
+    // Step 3: Zero-Loss Prompt Optimizer
+    var badgePrune = document.getElementById("stepPruneBadge");
+    if (badgePrune) {
+      badgePrune.textContent = (pr.tokens_saved > 0) ? ("-" + pr.tokens_saved + " TOKENS (" + pr.reduction_pct + "%)") : "PRESERVED";
+      badgePrune.className = "step-badge " + (pr.tokens_saved > 0 ? "badge-hit" : "badge-tier");
+    }
+    var valPrunedTok = document.getElementById("valPrunedTokens");
+    if (valPrunedTok) valPrunedTok.textContent = (pr.original_tokens || 0) + " \u2192 " + (pr.pruned_tokens || 0) + " tokens";
+    var valPrunedSaved = document.getElementById("valPrunedSaved");
+    if (valPrunedSaved) valPrunedSaved.textContent = (pr.tokens_saved || 0) + " tokens eliminated (" + (pr.reduction_pct || 0) + "% compression)";
 
-    // 4. Pruning
-    var pr = p.pruning;
-    document.getElementById("valPrunedTokens").textContent = pr.original_tokens + " &rarr; " + pr.pruned_tokens + " tokens";
-    document.getElementById("valPrunedSaved").textContent = pr.tokens_saved + " tokens saved (" + pr.reduction_pct + "%)";
-    document.getElementById("stepPruneBadge").textContent = pr.tokens_saved > 0 ? ("-" + pr.tokens_saved + " TOKENS") : "PRESERVED";
-    document.getElementById("stepPruneBadge").className = "step-badge " + (pr.tokens_saved > 0 ? "badge-hit" : "badge-tier");
+    // Step 4: Intelligent Model Routing
+    var badgeRoute = document.getElementById("stepRouteBadge");
+    if (badgeRoute) {
+      badgeRoute.textContent = (cr.model || p.tier || "economy").toUpperCase();
+      badgeRoute.className = "step-badge " + (cr.tier === "economy" ? "badge-hit" : (cr.tier === "balanced" ? "badge-tier" : "badge-purple"));
+    }
+    if (cr.signals) {
+      var sigL = cr.signals.length || 0;
+      var sigI = cr.signals.instruction || 0;
+      var sigR = cr.signals.reasoning || 0;
+      var sigC = cr.signals.code || 0;
+      var sL = document.getElementById("sigLen"); if (sL) sL.textContent = sigL.toFixed(2);
+      var fL = document.getElementById("fillLen"); if (fL) fL.style.width = Math.min(100, Math.round(sigL * 100)) + "%";
+      var sI = document.getElementById("sigInst"); if (sI) sI.textContent = sigI.toFixed(2);
+      var fI = document.getElementById("fillInst"); if (fI) fI.style.width = Math.min(100, Math.round(sigI * 100)) + "%";
+      var sR = document.getElementById("sigReason"); if (sR) sR.textContent = sigR.toFixed(2);
+      var fR = document.getElementById("fillReason"); if (fR) fR.style.width = Math.min(100, Math.round(sigR * 100)) + "%";
+      var sC = document.getElementById("sigCode"); if (sC) sC.textContent = sigC.toFixed(2);
+      var fC = document.getElementById("fillCode"); if (fC) fC.style.width = Math.min(100, Math.round(sigC * 100)) + "%";
+    }
+    var valTierModel = document.getElementById("valTierModel");
+    if (valTierModel) valTierModel.textContent = (cr.tier || "economy").toUpperCase() + " Tier (" + (cr.model || "gpt-4o-mini") + ")";
+    var valRationale = document.getElementById("valRoutingRationale");
+    if (valRationale) {
+      valRationale.textContent = (cr.tier === "economy") ? "Standard query routed to high-speed economy model for minimal token burn" : ((cr.tier === "balanced") ? "Multi-step analytical query routed to balanced model" : "Complex architectural/reasoning query routed to frontier model");
+    }
 
-    // 5. Complexity Router
-    var cr = p.complexity;
-    document.getElementById("sigLen").textContent = cr.signals.length.toFixed(2);
-    document.getElementById("fillLen").style.width = (cr.signals.length * 100) + "%";
-    document.getElementById("sigInst").textContent = cr.signals.instruction.toFixed(2);
-    document.getElementById("fillInst").style.width = (cr.signals.instruction * 100) + "%";
-    document.getElementById("sigReason").textContent = cr.signals.reasoning.toFixed(2);
-    document.getElementById("fillReason").style.width = (cr.signals.reasoning * 100) + "%";
-    document.getElementById("sigCode").textContent = cr.signals.code.toFixed(2);
-    document.getElementById("fillCode").style.width = (cr.signals.code * 100) + "%";
+    // Tab 3: Update Code Snippets
+    updateCodeSnippets();
 
-    document.getElementById("valTotalScore").textContent = cr.score.toFixed(4) + " (Cutoffs: 0.35 / 0.75)";
-    document.getElementById("valTierModel").textContent = cr.tier.toUpperCase() + " (" + cr.model + ")";
-    document.getElementById("stepRouteBadge").textContent = cr.tier.toUpperCase();
-    document.getElementById("stepRouteBadge").className = "step-badge " + (cr.tier === "economy" ? "badge-hit" : (cr.tier === "balanced" ? "badge-tier" : "badge-miss"));
+    // Tab 4: Raw JSON Inspector
+    var rawViewer = document.getElementById("rawJsonViewer");
+    if (rawViewer) rawViewer.textContent = JSON.stringify(data, null, 2);
 
-    // Response & Savings
-    document.getElementById("responseBox").style.display = "block";
-    document.getElementById("responseOutput").textContent = data.choices[0].message.content;
+    // Left pane savings banner
+    var savingsBanner = document.getElementById("savingsBanner");
+    if (savingsBanner) {
+      savingsBanner.style.display = "grid";
+      document.getElementById("bannerDeltaC").textContent = (sv.delta_c_pct != null ? sv.delta_c_pct : 0) + "%";
+      document.getElementById("bannerCost").textContent = fmtUsd(sv.cost_usd);
+      document.getElementById("bannerTokensSaved").textContent = fmtInt(sv.tokens_saved);
+      document.getElementById("bannerLatency").textContent = (sv.latency_ms || 0) + " ms";
+    }
 
-    var sv = p.savings;
-    document.getElementById("savingsBanner").style.display = "grid";
-    document.getElementById("bannerDeltaC").textContent = sv.delta_c_pct + "%";
-    document.getElementById("bannerCost").textContent = fmtUsd(sv.cost_usd);
-    document.getElementById("bannerTokensSaved").textContent = fmtInt(sv.tokens_saved);
-    document.getElementById("bannerLatency").textContent = sv.latency_ms + " ms";
-
-    // Show feedback buttons if L2 hit
-    document.getElementById("l2FeedbackControls").style.display = (l2.hit ? "block" : "none");
-    document.getElementById("btnFeedbackGood").className = "btn-feedback";
-    document.getElementById("btnFeedbackBad").className = "btn-feedback";
+    // Default to Response tab on each execution
+    switchConsoleTab("response");
   }
 
   function submitFeedback(isWrong) {

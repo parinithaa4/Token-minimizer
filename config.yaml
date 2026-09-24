@@ -5,31 +5,69 @@ cache:
   ttl_seconds: 3600
 
 providers:
-  mock:
-    type: mock
+  openai:
+    type: openai
+    base_url: "https://api.openai.com/v1"
+    api_key_env: OPENAI_API_KEY
+
+  anthropic:
+    type: anthropic
+    base_url: "https://api.anthropic.com/v1"
+    api_key_env: ANTHROPIC_API_KEY
 
   ollama:
     type: ollama
     base_url: "http://localhost:11434/v1"
 
+  mock:
+    type: mock
+
 routing:
+  # Real-world cloud & local enterprise model routes
+  gpt-4o:
+    provider: openai
+    upstream_model: gpt-4o
+    fallback: mock-echo
+
+  gpt-4o-mini:
+    provider: openai
+    upstream_model: gpt-4o-mini
+    fallback: mock-cheap
+
+  claude-3-5-sonnet:
+    provider: anthropic
+    upstream_model: claude-3-5-sonnet-20241022
+    fallback: mock-echo
+
+  claude-3-5-haiku:
+    provider: anthropic
+    upstream_model: claude-3-5-haiku-20241022
+    fallback: mock-cheap
+
+  gemini-1.5-flash:
+    provider: openai
+    upstream_model: gemini-1.5-flash
+    fallback: mock-cheap
+
+  llama-3.1:
+    provider: ollama
+    upstream_model: llama3.1:8b
+    fallback: mock-cheap
+
+  # Offline/simulation fallbacks
   mock-echo:
     provider: mock
     upstream_model: mock-echo
 
-  qwen-local:
-    provider: ollama
-    upstream_model: qwen3:8b
-
-  llama-local:
-    provider: ollama
-    upstream_model: llama3.1:8b
+  mock-cheap:
+    provider: mock
+    upstream_model: mock-cheap
 
 keys:
   - key: "sk-gw-dev"
     name: dev
     allowed_models: []
-    max_usd: 10.0
+    max_usd: 50.0
     cache_enabled: true
 
 semantic_cache:
@@ -41,11 +79,11 @@ semantic_cache:
 
 complexity_routing:
   enabled: true
-  auto_model: tokenguard-auto
+  auto_model: tokenmingate
 
   tier_models:
-    economy: mock-cheap
-    balanced: mock-echo
-    frontier: mock-echo
+    economy: gpt-4o-mini
+    balanced: claude-3-5-sonnet
+    frontier: gpt-4o
 
-default_team_id: default
+default_team_id: platform

@@ -40,8 +40,9 @@ _SEED_PRICES: dict[str, ModelPrice] = {
     "gpt-4o": ModelPrice(2.5, 10.0, verify=True, source="litellm-seed"),
     "gpt-4o-mini": ModelPrice(0.15, 0.6, verify=True, source="litellm-seed"),
     "gpt-4-turbo": ModelPrice(10.0, 30.0, verify=True, source="litellm-seed"),
-    # The built-in mock provider: deterministic, free-to-run, but we assign it
-    # a non-zero price so cost-accounting and budget tests are meaningful.
+    "gemini-1.5-flash": ModelPrice(0.075, 0.30, source="litellm-seed"),
+    "llama-3.1": ModelPrice(0.05, 0.10, source="local"),
+    # Built-in simulation fallbacks:
     "mock-echo": ModelPrice(1.0, 2.0, source="mock"),
     "mock-cheap": ModelPrice(0.10, 0.20, source="mock"),
 }

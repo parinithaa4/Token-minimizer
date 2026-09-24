@@ -124,19 +124,19 @@ class Gateway:
         """Map complexity tier to available model."""
         routes = self.config.routes
         if tier == "economy":
-            for m in ["mock-cheap", "gpt-4o-mini", "claude-3-5-haiku"]:
+            for m in ["gpt-4o-mini", "claude-3-5-haiku", "gemini-1.5-flash", "mock-cheap"]:
                 if m in routes:
                     return m
         elif tier == "balanced":
-            for m in ["mock-echo", "gpt-4o", "claude-3-5-sonnet"]:
+            for m in ["claude-3-5-sonnet", "gpt-4o", "mock-echo"]:
                 if m in routes:
                     return m
         else:  # frontier
-            for m in ["mock-echo", "o1", "claude-3-opus", "gpt-4o"]:
+            for m in ["gpt-4o", "claude-3-opus", "o1", "mock-echo"]:
                 if m in routes:
                     return m
         # Fallback to first configured route
-        return next(iter(routes.keys()), "mock-echo")
+        return next(iter(routes.keys()), "gpt-4o-mini")
 
     # ----- main entrypoint (TokenMinGate Algorithm 1) -----------------------
 

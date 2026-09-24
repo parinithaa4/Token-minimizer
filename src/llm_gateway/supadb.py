@@ -142,8 +142,13 @@ class SupaDB:
         database_url: str | None = None,
         connection: sqlite3.Connection | None = None,
     ) -> None:
-        self.supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
-        self.supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_KEY", "")
+        try:
+            from dotenv import load_dotenv
+            load_dotenv()
+        except Exception:
+            pass
+        self.supabase_url = os.environ.get("SUPABASE_URL", "https://eloedezdxtvpkdxebzkc.supabase.co").rstrip("/")
+        self.supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_KEY", "sb_live_service_role_secret")
         self.is_supabase_active = bool(self.supabase_url and self.supabase_key)
 
         db_path = database_url or os.environ.get("GATEWAY_DATABASE_URL", "llm_gateway.db")

@@ -1,28 +1,41 @@
 services:
-  gateway:
-    build: .
-    image: llm-gateway:latest
+  tokenmingate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tokenmingate:latest
+    container_name: tokenmingate-gateway
     ports:
-      - "8000:8000"
+      - "${PORT:-8080}:8080"
     environment:
-      # Point the cache at the bundled Redis. The gateway falls back to an
-      # in-memory cache automatically if Redis is unreachable.
-      REDIS_URL: "redis://redis:6379/0"
-      # Mount and reference a config.yaml to enable real providers; without it
-      # the gateway serves the offline mock provider + dev key (sk-gw-dev).
-      # GATEWAY_CONFIG: "/app/config.yaml"
-    # volumes:
-    #   - ./config.yaml:/app/config.yaml:ro
-    #   - gateway-data:/app/data
+      - PORT=8080
+      - GATEWAY_DATABASE_URL=sqlite:///app/data/gateway.db
+      - SUPABASE_URL=${SUPABASE_URL:-https://eloedezdxtvpkdxebzkc.supabase.co}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./data:/app/data
+      - ./config.yaml:/app/config.yaml:ro
     depends_on:
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     restart: unless-stopped
 
   redis:
     image: redis:7-alpine
+    container_name: tokenmingate-redis
     ports:
       - "6379:6379"
+    volumes:
+      - redis-cache:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -30,5 +43,5 @@ services:
       retries: 5
     restart: unless-stopped
 
-# volumes:
-#   gateway-data:
+volumes:
+  redis-cache:
