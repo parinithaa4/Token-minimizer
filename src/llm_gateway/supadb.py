@@ -415,8 +415,90 @@ class SupaDB:
 
     def list_teams(self) -> list[dict]:
         with self._lock:
-            rows = self._conn.execute("SELECT * FROM teams ORDER BY name ASC").fetchall()
-        return [dict(r) for r in rows]
+            teams = self._conn.execute("SELECT * FROM teams ORDER BY name ASC").fetchall()
+            out = []
+            for t in teams:
+                tid = t["id"]
+                emp_count = self._conn.execute(
+                    "SELECT COUNT(*) as c FROM employees WHERE team_id = ?", (tid,)
+                ).fetchone()["c"]
+                spend_row = self._conn.execute(
+                    "SELECT SUM(cost_usd) as s, SUM(total_tokens) as tok, COUNT(*) as reqs FROM request_log WHERE team_id = ?",
+                    (tid,),
+                ).fetchone()
+                total_spend = spend_row["s"] or 0.0
+                total_tokens = spend_row["tok"] or 0
+                total_reqs = spend_row["reqs"] or 0
+                budget_usd = t["budget_usd"]
+                used_ratio = min(1.0, total_spend / budget_usd) if budget_usd > 0 else 0.0
+                out.append(
+                    {
+                        "id": t["id"],
+                        "name": t["name"],
+                        "budget_usd": round(budget_usd, 2),
+                        "budget_tokens": t["budget_tokens"],
+                        "created_at": t["created_at"],
+                        "employee_count": emp_count,
+                        "spent_usd": round(total_spend, 4),
+                        "used_tokens": total_tokens,
+                        "requests": total_reqs,
+                        "budget_used_ratio": round(used_ratio, 4),
+                        "budget_remaining_usd": round(max(0.0, budget_usd - total_spend), 4),
+                    }
+                )
+            return out
+
+    def create_team(
+        self,
+        team_id: str,
+        name: str,
+        budget_usd: float = 100.0,
+        budget_tokens: int = 1_000_000,
+    ) -> dict:
+        tid = team_id.strip().lower().replace(" ", "-")
+        now = time.time()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO teams (id, name, budget_usd, budget_tokens, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    budget_usd = excluded.budget_usd,
+                    budget_tokens = excluded.budget_tokens
+                """,
+                (tid, name.strip(), float(budget_usd), int(budget_tokens), now),
+            )
+            self._conn.commit()
+        return {
+            "id": tid,
+            "name": name.strip(),
+            "budget_usd": float(budget_usd),
+            "budget_tokens": int(budget_tokens),
+            "created_at": now,
+        }
+
+    def update_team(
+        self,
+        team_id: str,
+        name: str | None = None,
+        budget_usd: float | None = None,
+        budget_tokens: int | None = None,
+    ) -> bool:
+        tid = team_id.strip().lower()
+        with self._lock:
+            existing = self._conn.execute("SELECT * FROM teams WHERE id = ?", (tid,)).fetchone()
+            if not existing:
+                return False
+            new_name = name.strip() if name is not None else existing["name"]
+            new_budget = float(budget_usd) if budget_usd is not None else existing["budget_usd"]
+            new_tokens = int(budget_tokens) if budget_tokens is not None else existing["budget_tokens"]
+            self._conn.execute(
+                "UPDATE teams SET name = ?, budget_usd = ?, budget_tokens = ? WHERE id = ?",
+                (new_name, new_budget, new_tokens, tid),
+            )
+            self._conn.commit()
+            return True
 
     def register_employee(
         self,

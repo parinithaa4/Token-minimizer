@@ -74,6 +74,19 @@ class RegisterRequest(BaseModel):
     team_id: str = "support"
 
 
+class TeamCreateRequest(BaseModel):
+    id: str
+    name: str
+    budget_usd: float = 100.0
+    budget_tokens: int = 1_000_000
+
+
+class TeamUpdateRequest(BaseModel):
+    name: str | None = None
+    budget_usd: float | None = None
+    budget_tokens: int | None = None
+
+
 class PipelineChatRequest(BaseModel):
     model: str = "tokenmingate"
     messages: list[dict[str, Any]]
@@ -427,6 +440,34 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
                 "api_key": emp.api_key,
             }
         return {"name": vkey.name, "api_key": vkey.key, "team_id": "platform", "role": "developer"}
+
+    # ----- Team Administration Endpoints ------------------------------------
+
+    @app.get("/api/teams")
+    async def api_list_teams():
+        return supadb.list_teams()
+
+    @app.post("/api/teams")
+    async def api_create_team(req: TeamCreateRequest):
+        team = supadb.create_team(
+            team_id=req.id,
+            name=req.name,
+            budget_usd=req.budget_usd,
+            budget_tokens=req.budget_tokens,
+        )
+        return team
+
+    @app.put("/api/teams/{team_id}")
+    async def api_update_team(team_id: str, req: TeamUpdateRequest):
+        ok = supadb.update_team(
+            team_id=team_id,
+            name=req.name,
+            budget_usd=req.budget_usd,
+            budget_tokens=req.budget_tokens,
+        )
+        if not ok:
+            return JSONResponse(status_code=404, content={"detail": f"Team {team_id!r} not found"})
+        return {"success": True, "team_id": team_id}
 
     # ----- Interactive Gateway Pipeline Execution ---------------------------
 

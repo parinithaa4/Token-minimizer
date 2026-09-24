@@ -361,6 +361,53 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     color: #94A3B8; margin-top: 14px;
   }
 
+  /* Teams & Budgets */
+  .teams-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+    margin-top: 18px;
+  }
+  .team-card {
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius);
+    padding: 18px;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+  }
+  .team-card:hover {
+    border-color: rgba(52, 231, 255, 0.3);
+    transform: translateY(-2px);
+  }
+  .team-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .team-card-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--ink);
+  }
+  .progress-bar-wrap {
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+    margin-top: 6px;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    transition: width 0.3s ease;
+  }
+  .team-form-card {
+    background: var(--bg-alt);
+    border: 1px solid var(--surface-border-active);
+    border-radius: var(--radius);
+    padding: 18px;
+  }
+
   /* Responsive */
   @media (max-width: 960px) {
     .auth-grid { grid-template-columns: 1fr; }
@@ -390,6 +437,10 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       <button class="nav-tab active" onclick="switchTab('playground')">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
         Playground
+      </button>
+      <button class="nav-tab" onclick="switchTab('teams')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Teams &amp; Budgets
       </button>
       <button class="nav-tab" onclick="switchTab('research')">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
@@ -729,6 +780,61 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   </section>
 
   <!-- ===================================================================== -->
+  <!-- VIEW: TEAMS & BUDGETS (COST GOVERNANCE & MULTI-TENANCY) -->
+  <!-- ===================================================================== -->
+  <section id="paneTeams" class="tab-pane">
+    <div class="panel">
+      <div class="panel-hd">
+        <div>
+          <div class="panel-title">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span>Team &amp; Department Cost Governance</span>
+          </div>
+          <div class="panel-subtitle">Manage monthly budget limits ($ USD), token quotas, and track live consumption per tenant namespace</div>
+        </div>
+        <button class="btn-primary" style="width:auto; padding:8px 16px; margin:0;" onclick="toggleAddTeamForm()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+          <span>Add New Team</span>
+        </button>
+      </div>
+
+      <!-- Add / Edit Team Form Card -->
+      <div id="teamFormCard" class="team-form-card" style="display:none; margin-top:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+          <h3 id="teamFormTitle" style="font-size:14px; font-weight:700; color:var(--ink);">Add New Team / Department</h3>
+          <button class="btn-feedback" id="teamFormCancelBtn" onclick="toggleAddTeamForm(false)">Cancel</button>
+        </div>
+        <form onsubmit="saveTeam(event)" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:14px; align-items:flex-end;">
+          <div class="form-group" style="margin-bottom:0;">
+            <label>Team Unique ID (Slug)</label>
+            <input type="text" id="teamIdInput" class="form-input" placeholder="e.g. data-science" required />
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label>Department / Team Name</label>
+            <input type="text" id="teamNameInput" class="form-input" placeholder="e.g. Data Science & ML" required />
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label>Monthly Budget ($ USD)</label>
+            <input type="number" step="0.01" min="1" id="teamBudgetInput" class="form-input" value="250.00" required />
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label>Monthly Token Quota</label>
+            <input type="number" step="10000" min="10000" id="teamTokensInput" class="form-input" value="2500000" required />
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button type="submit" class="btn-primary" style="margin:0; height:38px;">Save Team Details</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Teams Grid -->
+      <div id="teamsGrid" class="teams-grid">
+        <div style="text-align:center; color:var(--muted); padding:40px; grid-column: 1 / -1;">Loading team details...</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
   <!-- VIEW 2: RESEARCH & PAPER REPLICATION OBSERVABILITY -->
   <!-- ===================================================================== -->
   <section id="paneResearch" class="tab-pane">
@@ -1045,11 +1151,16 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   window.evictCache = evictCache;
   window.syncSupabase = syncSupabase;
   window.copySchemaSql = copySchemaSql;
+  window.loadTeams = loadTeams;
+  window.saveTeam = saveTeam;
+  window.openEditTeamModal = openEditTeamModal;
+  window.toggleAddTeamForm = toggleAddTeamForm;
 
   // Initialize
   document.addEventListener("DOMContentLoaded", function() {
     initAuth();
     loadDemoUsers();
+    loadTeams();
     renderCharts();
     loadSchemaSql();
     // Fetch /admin/usage for observability metrics
@@ -1089,6 +1200,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     document.getElementById("activeKeyBadge").textContent = u.api_key;
 
     switchTab('playground');
+    loadTeams();
     loadResearchData();
     loadDbStatus();
   }
@@ -1096,29 +1208,211 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   function switchTab(tabId) {
     state.activeTab = tabId;
     var tabs = document.querySelectorAll(".nav-tab");
-    tabs.forEach(function(t) { t.classList.remove("active"); });
+    tabs.forEach(function(t) {
+      var oc = t.getAttribute("onclick") || "";
+      if (oc.indexOf("'" + tabId + "'") !== -1) {
+        t.classList.add("active");
+      } else {
+        t.classList.remove("active");
+      }
+    });
     
     hideAllPanes();
 
     if (tabId === 'playground') {
-      tabs[0].classList.add("active");
       document.getElementById("panePlayground").classList.add("active");
+    } else if (tabId === 'teams') {
+      document.getElementById("paneTeams").classList.add("active");
+      loadTeams();
     } else if (tabId === 'research') {
-      tabs[1].classList.add("active");
       document.getElementById("paneResearch").classList.add("active");
       loadResearchData();
     } else if (tabId === 'ledger') {
-      tabs[2].classList.add("active");
       document.getElementById("paneLedger").classList.add("active");
       loadLedger();
     } else if (tabId === 'cache') {
-      tabs[3].classList.add("active");
       document.getElementById("paneCache").classList.add("active");
       loadCacheEntries();
     } else if (tabId === 'supadb') {
-      tabs[4].classList.add("active");
       document.getElementById("paneSupadb").classList.add("active");
       loadDbStatus();
+    }
+  }
+
+  function toggleAddTeamForm(show) {
+    var card = document.getElementById("teamFormCard");
+    if (!card) return;
+    if (show === undefined) {
+      card.style.display = (card.style.display === "none" || !card.style.display) ? "block" : "none";
+    } else {
+      card.style.display = show ? "block" : "none";
+    }
+    if (card.style.display === "block") {
+      card.scrollIntoView({ behavior: 'smooth' });
+    }
+  }
+
+  function openEditTeamModal(id, name, budget, tokens) {
+    var card = document.getElementById("teamFormCard");
+    card.style.display = "block";
+    card.scrollIntoView({ behavior: 'smooth' });
+
+    var idInput = document.getElementById("teamIdInput");
+    idInput.value = id;
+    idInput.disabled = true;
+    idInput.title = "Team ID cannot be changed once created";
+
+    document.getElementById("teamNameInput").value = name;
+    document.getElementById("teamBudgetInput").value = budget;
+    document.getElementById("teamTokensInput").value = tokens;
+
+    document.getElementById("teamFormTitle").textContent = "Edit Budget & Quotas: " + name + " (" + id + ")";
+    document.getElementById("teamFormCancelBtn").style.display = "inline-flex";
+  }
+
+  function saveTeam(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    var idInput = document.getElementById("teamIdInput");
+    var nameInput = document.getElementById("teamNameInput");
+    var budgetInput = document.getElementById("teamBudgetInput");
+    var tokensInput = document.getElementById("teamTokensInput");
+
+    var id = idInput.value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+    var name = nameInput.value.trim();
+    var budget = parseFloat(budgetInput.value) || 100.0;
+    var tokens = parseInt(tokensInput.value) || 1000000;
+
+    if (!id || !name) {
+      alert("Please provide both Team ID and Team Name.");
+      return;
+    }
+
+    var isEdit = idInput.disabled;
+    var url = isEdit ? ("/api/teams/" + encodeURIComponent(id)) : "/api/teams";
+    var method = isEdit ? "PUT" : "POST";
+    var payload = isEdit 
+      ? { name: name, budget_usd: budget, budget_tokens: tokens }
+      : { id: id, name: name, budget_usd: budget, budget_tokens: tokens };
+
+    fetch(url, {
+      method: method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+    .then(function(r) {
+      if (!r.ok) {
+        return r.json().then(function(err) { throw new Error(err.detail || "Failed to save team"); });
+      }
+      return r.json();
+    })
+    .then(function(res) {
+      alert("Team details for '" + (res.name || name) + "' saved successfully!");
+      idInput.value = "";
+      idInput.disabled = false;
+      idInput.title = "";
+      nameInput.value = "";
+      budgetInput.value = "250.00";
+      tokensInput.value = "2500000";
+      document.getElementById("teamFormTitle").textContent = "Add New Team / Department";
+      toggleAddTeamForm(false);
+      loadTeams();
+    })
+    .catch(function(err) {
+      alert("Error saving team: " + err.message);
+    });
+  }
+
+  function loadTeams() {
+    fetch("/api/teams")
+      .then(function(r) { return r.json(); })
+      .then(function(teams) {
+        state.teamsList = teams;
+        renderTeamsGrid(teams);
+        updateTeamDropdowns(teams);
+      })
+      .catch(function(err) {
+        var grid = document.getElementById("teamsGrid");
+        if (grid) grid.innerHTML = '<div style="color:var(--red); padding:20px;">Failed to load teams: ' + esc(err.message) + '</div>';
+      });
+  }
+
+  function renderTeamsGrid(teams) {
+    var grid = document.getElementById("teamsGrid");
+    if (!grid) return;
+    if (!teams || !teams.length) {
+      grid.innerHTML = '<div style="text-align:center; color:var(--muted); padding:40px; grid-column:1/-1;">No teams registered yet. Click &quot;Add New Team&quot; above to create your first team!</div>';
+      return;
+    }
+
+    grid.innerHTML = teams.map(function(t) {
+      var ratio = t.budget_used_ratio || 0;
+      var pct = Math.min(100, Math.round(ratio * 100));
+      var spendColor = ratio >= 0.9 ? 'var(--red)' : (ratio >= 0.75 ? 'var(--amber)' : 'var(--green)');
+
+      return '<div class="team-card">' +
+        '<div class="team-card-header">' +
+          '<div>' +
+            '<div class="team-card-title">' + esc(t.name) + '</div>' +
+            '<div class="mono" style="font-size:11px; color:var(--muted); margin-top:2px;">ID: <span style="color:var(--cyan);">' + esc(t.id) + '</span></div>' +
+          '</div>' +
+          '<span class="step-badge badge-tier">' + (t.employee_count || 0) + ' Members</span>' +
+        '</div>' +
+        '<div style="margin-top:14px;">' +
+          '<div style="display:flex; justify-content:space-between; font-size:11.5px; margin-bottom:4px;">' +
+            '<span style="color:var(--muted);">Budget Consumption</span>' +
+            '<span class="mono" style="font-weight:700; color:' + spendColor + ';">' + fmtUsd(t.spent_usd) + ' / ' + fmtUsd(t.budget_usd) + ' (' + pct + '%)</span>' +
+          '</div>' +
+          '<div class="progress-bar-wrap">' +
+            '<div class="progress-bar-fill" style="width:' + pct + '%; background:' + spendColor + ';"></div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px; font-size:11.5px; background:rgba(255,255,255,0.02); padding:10px; border-radius:var(--radius-sm); border:1px solid rgba(255,255,255,0.04);">' +
+          '<div>' +
+            '<div style="color:var(--muted); text-transform:uppercase; font-size:9.5px; letter-spacing:0.04em;">Remaining Budget</div>' +
+            '<div class="mono" style="font-weight:700; color:var(--green); margin-top:2px;">' + fmtUsd(t.budget_remaining_usd) + '</div>' +
+          '</div>' +
+          '<div>' +
+            '<div style="color:var(--muted); text-transform:uppercase; font-size:9.5px; letter-spacing:0.04em;">Tokens (Used / Max)</div>' +
+            '<div class="mono" style="font-weight:600; color:var(--ink); margin-top:2px;">' + fmtInt(t.used_tokens) + ' / ' + fmtInt(t.budget_tokens) + '</div>' +
+          '</div>' +
+          '<div>' +
+            '<div style="color:var(--muted); text-transform:uppercase; font-size:9.5px; letter-spacing:0.04em;">Requests Handled</div>' +
+            '<div class="mono" style="color:var(--ink); margin-top:2px;">' + fmtInt(t.requests) + ' reqs</div>' +
+          '</div>' +
+          '<div>' +
+            '<div style="color:var(--muted); text-transform:uppercase; font-size:9.5px; letter-spacing:0.04em;">Isolation Namespace</div>' +
+            '<div class="mono" style="color:var(--cyan); margin-top:2px;">N: ' + esc(t.id) + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="margin-top:14px; display:flex; justify-content:space-between; align-items:center;">' +
+          '<span style="font-size:10.5px; color:var(--dim);">' + (t.budget_remaining_usd <= 0 ? '⚠️ Budget Limit Reached' : '✅ Active &amp; Operational') + '</span>' +
+          '<button class="btn-feedback" onclick="openEditTeamModal(\'' + esc(t.id) + '\', \'' + esc(t.name) + '\', ' + t.budget_usd + ', ' + t.budget_tokens + ')">' +
+            '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px; vertical-align:middle;"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>' +
+            'Edit Budget &amp; Quota' +
+          '</button>' +
+        '</div>' +
+      '</div>';
+    }).join("");
+  }
+
+  function updateTeamDropdowns(teams) {
+    if (!teams || !teams.length) return;
+    var regSel = document.getElementById("regTeam");
+    if (regSel) {
+      var curr = regSel.value;
+      regSel.innerHTML = teams.map(function(t) {
+        return '<option value="' + esc(t.id) + '">' + esc(t.name) + '</option>';
+      }).join("");
+      if (curr) regSel.value = curr;
+    }
+    var ledSel = document.getElementById("ledgerTeamFilter");
+    if (ledSel) {
+      var currLed = ledSel.value;
+      var opts = '<option value="">All Teams</option>' + teams.map(function(t) {
+        return '<option value="' + esc(t.id) + '">' + esc(t.name) + '</option>';
+      }).join("");
+      ledSel.innerHTML = opts;
+      if (currLed) ledSel.value = currLed;
     }
   }
 
