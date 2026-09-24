@@ -1,163 +1,209 @@
-"""
-complexity_router.py — difficulty scorer S(u) and Economy/Balanced/Frontier
-tier selection, per TokenMinGate Section V (Eq. 10) and Section VII-B
-(the "leans upward" safety rule).
+"""Deterministic request-complexity scoring and model-tier routing.
 
-Drop into src/llm_gateway/complexity_router.py and call from gateway.py
-after prompt pruning (Algorithm 1, lines 15-17), replacing / sitting in
-front of the static `routing:` config-file mapping. See INTEGRATION.md.
+This is intentionally heuristic rather than an ML classifier. It implements
+the baseline complexity score used by TokenMinGate:
+
+S(u) =
+    w1 * length_signal
+  + w2 * instruction_signal
+  + w3 * reasoning_signal
+  + w4 * code_signal
+
+Tiers:
+    Economy   : S < 0.35
+    Balanced  : 0.35 <= S < 0.75
+    Frontier  : S >= 0.75
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
-from enum import Enum
+import re
 
 
-class Tier(str, Enum):
-    ECONOMY = "economy"
-    BALANCED = "balanced"
-    FRONTIER = "frontier"
-
-
-# Reasoning-signal words called out in the paper text (Section V).
-DEFAULT_REASONING_WORDS = {
-    "derive", "evaluate", "synthesize", "prove", "optimize", "analyze",
-    "compare", "justify", "critique", "design", "architect", "debug",
-    "refactor", "reconcile", "diagnose",
-}
-
-# Crude instruction-count heuristic: numbered/bulleted steps or imperative
-# connective words. Tune per-deployment, or replace with a real parser.
-_INSTRUCTION_PATTERN = re.compile(
-    r"(?:^|\n)\s*(?:\d+[.)]|[-*\u2022])\s+|(?:\bplease\b|\bthen\b|\bnext\b)",
-    re.IGNORECASE,
-)
-
-_CODE_FENCE_PATTERN = re.compile(
-    r"```|`[^`\n]+`|\bdef \w+\(|\bclass \w+[:(]|;\s*$", re.MULTILINE
-)
-
-
-@dataclass
-class ComplexityWeights:
-    """w1..w4 and theta scale factors from Eq. 10."""
-    w_len: float = 0.30
-    w_inst: float = 0.25
-    w_reason: float = 0.25
-    w_code: float = 0.20
-
-    theta_len_tokens: int = 400     # length at which the length term saturates
-    theta_inst_count: int = 4       # instruction count at which that term saturates
-    theta_reason_count: int = 3     # reasoning-word count at which that term saturates
-
-
-@dataclass
-class TierThresholds:
-    economy_max: float = 0.35        # S(u) <  economy_max                -> Economy
-    balanced_max: float = 0.75       # economy_max <= S(u) < balanced_max -> Balanced
-    # S(u) >= balanced_max -> Frontier
-    upward_lean_low: float = 0.35    # ambiguous band bumped to Balanced (Sec. VII-B)
-    upward_lean_high: float = 0.40
-
-
-DEFAULT_TIER_MODELS: dict[Tier, dict[str, str]] = {
-    Tier.ECONOMY: {"openai": "gpt-4o-mini", "anthropic": "claude-3-5-haiku"},
-    Tier.BALANCED: {"openai": "gpt-4o", "anthropic": "claude-3-5-sonnet"},
-    Tier.FRONTIER: {"openai": "o1", "anthropic": "claude-3-opus"},
-}
-
-
-def _rough_token_count(text: str) -> int:
-    # Cheap stand-in for a real tokenizer; swap in tiktoken / Anthropic's
-    # counter if Eq. 10's |u|_tok needs to be exact.
-    return max(1, len(text) // 4)
-
-
-def _count_instructions(text: str) -> int:
-    return len(_INSTRUCTION_PATTERN.findall(text))
-
-
-def _count_reasoning_words(text: str, vocab: set[str]) -> int:
-    words = re.findall(r"[a-zA-Z]+", text.lower())
-    return sum(1 for w in words if w in vocab)
-
-
-def _has_code(text: str) -> bool:
-    return bool(_CODE_FENCE_PATTERN.search(text))
-
-
-def complexity_score(
-    prompt: str,
-    weights: ComplexityWeights = ComplexityWeights(),
-    reasoning_vocab: set[str] = None,
-) -> float:
-    """S(u) -- Eq. 10."""
-    reasoning_vocab = reasoning_vocab or DEFAULT_REASONING_WORDS
-
-    tok_len = _rough_token_count(prompt)
-    n_inst = _count_instructions(prompt)
-    n_reason = _count_reasoning_words(prompt, reasoning_vocab)
-    has_code = _has_code(prompt)
-
-    term_len = weights.w_len * min(1.0, tok_len / weights.theta_len_tokens)
-    term_inst = weights.w_inst * min(1.0, n_inst / weights.theta_inst_count)
-    term_reason = weights.w_reason * min(1.0, n_reason / weights.theta_reason_count)
-    term_code = weights.w_code * (1.0 if has_code else 0.0)
-
-    return term_len + term_inst + term_reason + term_code
-
-
-def select_tier(
-    prompt: str,
-    weights: ComplexityWeights = ComplexityWeights(),
-    thresholds: TierThresholds = TierThresholds(),
-    reasoning_vocab: set[str] = None,
-) -> tuple[Tier, float]:
-    """
-    Returns (tier, score). Implements Section VII-B's safety rule: ambiguous
-    scores get bumped to Balanced, and prompts with code or reasoning-heavy
-    language skip Economy entirely.
-    """
-    reasoning_vocab = reasoning_vocab or DEFAULT_REASONING_WORDS
-    score = complexity_score(prompt, weights, reasoning_vocab)
-
-    has_code = _has_code(prompt)
-    n_reason = _count_reasoning_words(prompt, reasoning_vocab)
-
-    if thresholds.upward_lean_low <= score < thresholds.upward_lean_high:
-        return Tier.BALANCED, score
-
-    if score < thresholds.economy_max:
-        if has_code or n_reason > 0:
-            return Tier.BALANCED, score  # skip Economy per Sec. VII-B
-        return Tier.ECONOMY, score
-
-    if score < thresholds.balanced_max:
-        return Tier.BALANCED, score
-
-    return Tier.FRONTIER, score
+@dataclass(frozen=True)
+class ComplexityResult:
+    score: float
+    tier: str
+    length_signal: float
+    instruction_signal: float
+    reasoning_signal: float
+    code_signal: float
 
 
 class ComplexityRouter:
-    """Stateful wrapper you can hand a request straight to from gateway.py."""
+    """Deterministic complexity router.
+
+    The router does not call an LLM and does not claim to measure intelligence.
+    It provides a reproducible routing heuristic for experiments.
+    """
 
     def __init__(
         self,
-        weights: ComplexityWeights = None,
-        thresholds: TierThresholds = None,
-        tier_models: dict[Tier, dict[str, str]] = None,
-        reasoning_vocab: set[str] = None,
+        *,
+        length_threshold: int = 500,
+        instruction_threshold: int = 5,
+        reasoning_threshold: int = 3,
+        w_length: float = 0.25,
+        w_instruction: float = 0.20,
+        w_reasoning: float = 0.35,
+        w_code: float = 0.20,
     ) -> None:
-        self.weights = weights or ComplexityWeights()
-        self.thresholds = thresholds or TierThresholds()
-        self.tier_models = tier_models or DEFAULT_TIER_MODELS
-        self.reasoning_vocab = reasoning_vocab or DEFAULT_REASONING_WORDS
+        weights = (
+            w_length,
+            w_instruction,
+            w_reasoning,
+            w_code,
+        )
 
-    def route(self, prompt: str, provider_family: str = "anthropic") -> dict:
-        tier, score = select_tier(prompt, self.weights, self.thresholds, self.reasoning_vocab)
-        model = self.tier_models[tier].get(provider_family)
-        if model is None:
-            raise ValueError(f"No model configured for tier={tier} provider={provider_family}")
-        return {"tier": tier.value, "score": round(score, 4), "model": model}
+        if any(w < 0 for w in weights):
+            raise ValueError("complexity weights must be non-negative")
+
+        total = sum(weights)
+        if total <= 0:
+            raise ValueError("complexity weights must sum to > 0")
+
+        self.length_threshold = max(1, length_threshold)
+        self.instruction_threshold = max(1, instruction_threshold)
+        self.reasoning_threshold = max(1, reasoning_threshold)
+
+        self.w_length = w_length / total
+        self.w_instruction = w_instruction / total
+        self.w_reasoning = w_reasoning / total
+        self.w_code = w_code / total
+
+    @staticmethod
+    def _count_instructions(text: str) -> int:
+        patterns = [
+            r"\bwrite\b",
+            r"\bcreate\b",
+            r"\bbuild\b",
+            r"\bimplement\b",
+            r"\bcalculate\b",
+            r"\bcompare\b",
+            r"\banalyze\b",
+            r"\bexplain\b",
+            r"\bderive\b",
+            r"\bfix\b",
+            r"\bdebug\b",
+            r"\bsummarize\b",
+            r"\bevaluate\b",
+            r"\bdesign\b",
+            r"\bconvert\b",
+            r"\bextract\b",
+        ]
+
+        return sum(len(re.findall(pattern, text)) for pattern in patterns)
+
+    @staticmethod
+    def _count_reasoning_signals(text: str) -> int:
+        patterns = [
+            r"\bwhy\b",
+            r"\bjustify\b",
+            r"\bderive\b",
+            r"\bprove\b",
+            r"\breason\b",
+            r"\banalyze\b",
+            r"\bevaluate\b",
+            r"\btrade[- ]?off\b",
+            r"\bpros and cons\b",
+            r"\bstep[- ]by[- ]step\b",
+            r"\bcomplexity\b",
+            r"\bcompare\b",
+            r"\bimplications?\b",
+        ]
+
+        return sum(len(re.findall(pattern, text)) for pattern in patterns)
+
+    @staticmethod
+    def _code_signal(text: str) -> float:
+        code_patterns = [
+            r"```",
+            r"\bpython\b",
+            r"\bjavascript\b",
+            r"\btypescript\b",
+            r"\bjava\b",
+            r"\bc\+\+\b",
+            r"\bsql\b",
+            r"\bfunction\b",
+            r"\bclass\b",
+            r"\bapi\b",
+            r"\bregex\b",
+            r"\bjson\b",
+            r"\bstack trace\b",
+            r"\bexception\b",
+            r"\bcompile\b",
+            r"\bdebug\b",
+        ]
+
+        hits = sum(bool(re.search(pattern, text, re.IGNORECASE))
+                   for pattern in code_patterns)
+
+        return min(1.0, hits / 3.0)
+
+    def score(self, prompt: str) -> ComplexityResult:
+        text = prompt.strip()
+        words = len(re.findall(r"\S+", text))
+
+        length_signal = min(1.0, words / self.length_threshold)
+
+        instruction_count = self._count_instructions(text)
+        instruction_signal = min(
+            1.0,
+            instruction_count / self.instruction_threshold,
+        )
+
+        reasoning_count = self._count_reasoning_signals(text)
+        reasoning_signal = min(
+            1.0,
+            reasoning_count / self.reasoning_threshold,
+        )
+
+        code_signal = self._code_signal(text)
+
+        score = (
+            self.w_length * length_signal
+            + self.w_instruction * instruction_signal
+            + self.w_reasoning * reasoning_signal
+            + self.w_code * code_signal
+        )
+
+        score = max(0.0, min(1.0, score))
+
+        if score < 0.35:
+            tier = "economy"
+        elif score < 0.75:
+            tier = "balanced"
+        else:
+            tier = "frontier"
+
+        return ComplexityResult(
+            score=round(score, 6),
+            tier=tier,
+            length_signal=round(length_signal, 6),
+            instruction_signal=round(instruction_signal, 6),
+            reasoning_signal=round(reasoning_signal, 6),
+            code_signal=round(code_signal, 6),
+        )
+
+    def route(
+        self,
+        prompt: str,
+        *,
+        provider_family: str = "default",
+        models: dict[str, str] | None = None,
+    ) -> dict:
+        result = self.score(prompt)
+
+        return {
+            "score": result.score,
+            "tier": result.tier,
+            "provider_family": provider_family,
+            "model": (models or {}).get(result.tier),
+            "signals": {
+                "length": result.length_signal,
+                "instruction": result.instruction_signal,
+                "reasoning": result.reasoning_signal,
+                "code": result.code_signal,
+            },
+        }

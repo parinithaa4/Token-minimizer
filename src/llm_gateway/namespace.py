@@ -1,17 +1,28 @@
-"""
-namespace.py — request namespace hashing, per TokenMinGate Eq. 1.
+"""Namespace isolation for cache reuse.
 
-    N = Hash(team_id || system_prompt || provider_family || temp_bucket)
+N = SHA256(team_id || system_prompt || provider_family || temp_bucket)
 
-Cache entries (both L1 and L2) are only ever reused by requests carrying
-the same N, which keeps one team/app/config from seeing another's saved
-answers. Drop into src/llm_gateway/namespace.py.
+The namespace prevents semantically similar requests from different teams,
+system prompts, provider families, or temperature buckets from sharing
+responses.
 """
 
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
+
+
+def normalize_prompt(prompt: str) -> str:
+    """Normalize prompt text for cache identity and embedding."""
+    return " ".join(
+        prompt.strip().lower().split()
+    )
+
+
+def normalize_system_prompt(prompt: str) -> str:
+    return normalize_prompt(prompt)
 
 
 @dataclass(frozen=True)
@@ -22,19 +33,28 @@ class NamespaceKey:
     temperature: float
 
     def temp_bucket(self, bucket_width: float = 0.1) -> str:
-        """Bucket temperature so 0.71 and 0.73 land in the same namespace
-        but 0.71 and 0.91 don't."""
-        bucket = round(self.temperature / bucket_width) * bucket_width
+        if bucket_width <= 0:
+            raise ValueError("bucket_width must be > 0")
+
+        bucket = round(
+            float(self.temperature) / bucket_width
+        ) * bucket_width
+
         return f"{bucket:.2f}"
 
     def hash(self) -> str:
-        raw = "||".join([
-            self.team_id,
-            self.system_prompt or "",
-            self.provider_family,
+        values = [
+            self.team_id.strip(),
+            normalize_system_prompt(self.system_prompt),
+            self.provider_family.strip().lower(),
             self.temp_bucket(),
-        ])
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        ]
+
+        raw = "||".join(values)
+
+        return hashlib.sha256(
+            raw.encode("utf-8")
+        ).hexdigest()
 
 
 def namespace_for_request(
@@ -43,16 +63,23 @@ def namespace_for_request(
     provider_family: str,
     temperature: float,
 ) -> str:
-    return NamespaceKey(team_id, system_prompt, provider_family, temperature).hash()
+    return NamespaceKey(
+        team_id=team_id,
+        system_prompt=system_prompt,
+        provider_family=provider_family,
+        temperature=temperature,
+    ).hash()
 
 
-def normalize_prompt(prompt: str) -> str:
-    """u -- the cleaned prompt used as the L1 cache key input (Section III-B):
-    extra whitespace collapsed, lowercased."""
-    return " ".join(prompt.strip().lower().split())
+def l1_key(
+    namespace: str,
+    normalized_prompt: str,
+) -> str:
+    raw = (
+        f"{namespace}||"
+        f"{normalize_prompt(normalized_prompt)}"
+    )
 
-
-def l1_key(namespace: str, normalized_prompt: str) -> str:
-    """K_L1 = SHA-256(N || u)"""
-    raw = f"{namespace}||{normalized_prompt}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return hashlib.sha256(
+        raw.encode("utf-8")
+    ).hexdigest()

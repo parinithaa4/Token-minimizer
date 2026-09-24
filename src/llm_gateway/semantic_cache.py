@@ -1,18 +1,4 @@
-"""
-semantic_cache.py — L2 similarity cache with age-aware threshold (tau_eff)
-
-Implements the semantic ("near-duplicate") cache described in TokenMinGate
-Section III-B and the age-based cut-off in Section IV-A (Eq. 2).
-
-    tau_eff(a_i) = tau + (1 - tau) * min(1, a_i / T_k)
-
-Dependencies:
-    pip install faiss-cpu sentence-transformers numpy
-
-Drop this into src/llm_gateway/semantic_cache.py and wire it into
-gateway.py's request path — after an L1 miss, before prompt pruning /
-DISPATCH (see Algorithm 1, lines 5-14 and 19). See INTEGRATION.md.
-"""
+"""FAISS-backed L2 semantic cache with an age-aware similarity threshold."""
 
 from __future__ import annotations
 
@@ -25,111 +11,191 @@ import numpy as np
 
 try:
     import faiss
-except ImportError as e:
+except ImportError as exc:
     raise ImportError(
-        "semantic_cache requires faiss-cpu. Install with: pip install faiss-cpu"
-    ) from e
+        "Semantic cache requires faiss-cpu. "
+        "Install with: pip install faiss-cpu"
+    ) from exc
 
 try:
     from sentence_transformers import SentenceTransformer
-except ImportError as e:
+except ImportError as exc:
     raise ImportError(
-        "semantic_cache requires sentence-transformers. "
+        "Semantic cache requires sentence-transformers. "
         "Install with: pip install sentence-transformers"
-    ) from e
+    ) from exc
 
 
-DEFAULT_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"  # 384-dim, 22.7M params
-EMBED_DIM = 384
+DEFAULT_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
 
 @dataclass
 class CacheEntry:
-    """One saved (prompt, response) pair in the L2 index."""
     entry_id: str
     namespace: str
     prompt_norm: str
     response: dict
     created_at: float
     last_used_at: float
-    ttl_seconds: float          # T_k -- max lifespan for this entry's "type"
-    tokens_saved_if_hit: int    # tokens of the original request (for TRR bookkeeping)
+    ttl_seconds: float
+    tokens_saved_if_hit: int
+
+
+@dataclass(frozen=True)
+class SemanticLookup:
+    entry: CacheEntry
+    similarity: float
+    effective_threshold: float
+    age_seconds: float
 
 
 class SemanticCache:
-    """
-    FAISS-backed similarity cache with an age-rising acceptance threshold.
+    """In-memory FAISS semantic cache.
 
-    A saved entry is only reusable while cos_sim(query, entry) >= tau_eff(age).
-    As an entry approaches its TTL, tau_eff climbs to 1.0 -- i.e. it becomes
-    unreusable except by a near-identical prompt (paper Fig. 2/3).
+    Embeddings are L2-normalized, therefore FAISS inner-product similarity
+    equals cosine similarity.
+
+    Namespace filtering is performed after FAISS retrieval.
     """
 
     def __init__(
         self,
-        base_threshold: float = 0.84,                 # tau -- paper's chosen operating point
-        default_ttl_seconds: float = 7 * 24 * 3600,    # default T_k (7 days)
+        *,
+        base_threshold: float = 0.84,
+        default_ttl_seconds: float = 7 * 24 * 3600,
         embed_model_name: str = DEFAULT_MODEL_NAME,
-        k_neighbors: int = 5,
+        k_neighbors: int = 8,
     ) -> None:
-        if not (0.0 <= base_threshold < 1.0):
-            raise ValueError("base_threshold (tau) must be in [0, 1)")
-        self.tau = base_threshold
-        self.default_ttl = default_ttl_seconds
-        self.k = k_neighbors
+        if not 0.0 <= base_threshold < 1.0:
+            raise ValueError("base_threshold must be in [0, 1)")
+
+        if default_ttl_seconds <= 0:
+            raise ValueError("default_ttl_seconds must be > 0")
+
+        if k_neighbors <= 0:
+            raise ValueError("k_neighbors must be > 0")
+
+        self.tau = float(base_threshold)
+        self.default_ttl = float(default_ttl_seconds)
+        self.k = int(k_neighbors)
 
         self._model = SentenceTransformer(embed_model_name)
-        # Inner product on L2-normalized vectors == cosine similarity.
-        self._index = faiss.IndexFlatIP(EMBED_DIM)
-        self._id_map: list[str] = []          # FAISS row -> entry_id
-        self._entries: dict[str, CacheEntry] = {}
 
-    # ---------- embedding ----------
+        probe = self._model.encode(
+            ["dimension probe"],
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+        )
+        probe = np.asarray(probe, dtype=np.float32)
+
+        if probe.ndim != 2 or probe.shape[0] != 1:
+            raise RuntimeError("embedding model returned an invalid shape")
+
+        self.dimension = int(probe.shape[1])
+
+        self._index = faiss.IndexFlatIP(self.dimension)
+        self._id_map: list[str] = []
+        self._entries: dict[str, CacheEntry] = {}
+        self._vectors: dict[str, np.ndarray] = {}
 
     def _encode(self, text: str) -> np.ndarray:
-        vec = self._model.encode([text], normalize_embeddings=True)
-        return np.asarray(vec, dtype="float32")
+        vector = self._model.encode(
+            [text],
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+        )
 
-    # ---------- age-based threshold (Eq. 2) ----------
+        vector = np.asarray(vector, dtype=np.float32)
+
+        if vector.shape != (1, self.dimension):
+            raise RuntimeError(
+                f"embedding shape {vector.shape} does not match "
+                f"expected {(1, self.dimension)}"
+            )
+
+        return vector
 
     @staticmethod
-    def effective_threshold(tau: float, age_seconds: float, ttl_seconds: float) -> float:
+    def effective_threshold(
+        tau: float,
+        age_seconds: float,
+        ttl_seconds: float,
+    ) -> float:
         if ttl_seconds <= 0:
             return 1.0
-        normalized_age = min(1.0, max(0.0, age_seconds / ttl_seconds))
-        return tau + (1.0 - tau) * normalized_age
 
-    # ---------- lookup (Algorithm 1, lines 5-14) ----------
+        age_ratio = min(
+            1.0,
+            max(0.0, age_seconds / ttl_seconds),
+        )
 
-    def lookup(self, namespace: str, prompt_norm: str) -> Optional[CacheEntry]:
-        """Return the best matching, still-valid entry for this namespace, or None."""
+        return tau + (1.0 - tau) * age_ratio
+
+    def lookup(
+        self,
+        namespace: str,
+        prompt_norm: str,
+    ) -> Optional[SemanticLookup]:
         if self._index.ntotal == 0:
             return None
 
         query = self._encode(prompt_norm)
+
         k = min(self.k, self._index.ntotal)
-        scores, idxs = self._index.search(query, k)
+        scores, indices = self._index.search(query, k)
 
         now = time.time()
-        for score, row in zip(scores[0], idxs[0]):
-            if row == -1:
+
+        candidates: list[SemanticLookup] = []
+
+        for score, row in zip(scores[0], indices[0]):
+            if row < 0 or row >= len(self._id_map):
                 continue
+
             entry_id = self._id_map[row]
             entry = self._entries.get(entry_id)
-            if entry is None or entry.namespace != namespace:
+
+            if entry is None:
                 continue
 
-            age = now - entry.created_at
+            if entry.namespace != namespace:
+                continue
+
+            age = max(0.0, now - entry.created_at)
+
             if age > entry.ttl_seconds:
-                continue  # expired outright
+                continue
 
-            tau_eff = self.effective_threshold(self.tau, age, entry.ttl_seconds)
-            if score >= tau_eff:
-                entry.last_used_at = now
-                return entry
-        return None
+            threshold = self.effective_threshold(
+                self.tau,
+                age,
+                entry.ttl_seconds,
+            )
 
-    # ---------- admission (Algorithm 1, line 19 / ADMITTOCACHE) ----------
+            similarity = float(score)
+
+            if similarity >= threshold:
+                candidates.append(
+                    SemanticLookup(
+                        entry=entry,
+                        similarity=similarity,
+                        effective_threshold=threshold,
+                        age_seconds=age,
+                    )
+                )
+
+        if not candidates:
+            return None
+
+        candidates.sort(
+            key=lambda item: item.similarity,
+            reverse=True,
+        )
+
+        selected = candidates[0]
+        selected.entry.last_used_at = now
+
+        return selected
 
     def admit(
         self,
@@ -139,7 +205,8 @@ class SemanticCache:
         tokens_saved_if_hit: int,
         ttl_seconds: Optional[float] = None,
     ) -> str:
-        vec = self._encode(prompt_norm)
+        vector = self._encode(prompt_norm)
+
         entry_id = str(uuid.uuid4())
         now = time.time()
 
@@ -150,45 +217,79 @@ class SemanticCache:
             response=response,
             created_at=now,
             last_used_at=now,
-            ttl_seconds=ttl_seconds or self.default_ttl,
-            tokens_saved_if_hit=tokens_saved_if_hit,
+            ttl_seconds=float(
+                ttl_seconds
+                if ttl_seconds is not None
+                else self.default_ttl
+            ),
+            tokens_saved_if_hit=max(0, int(tokens_saved_if_hit)),
         )
 
-        self._index.add(vec)
+        self._index.add(vector)
         self._id_map.append(entry_id)
         self._entries[entry_id] = entry
+        self._vectors[entry_id] = vector[0].copy()
+
         return entry_id
 
-    # ---------- housekeeping ----------
-
     def purge_expired(self) -> int:
-        """
-        FAISS's IndexFlatIP has no cheap delete-by-id, so we rebuild the
-        index from scratch, dropping anything past its TTL. Call this
-        periodically (e.g. from a background task), not on every request.
-        """
         now = time.time()
-        keep = [
-            (eid, e) for eid, e in self._entries.items()
-            if (now - e.created_at) <= e.ttl_seconds
-        ]
+
+        keep: list[tuple[str, CacheEntry]] = []
+
+        for entry_id, entry in self._entries.items():
+            age = now - entry.created_at
+
+            if age <= entry.ttl_seconds:
+                keep.append((entry_id, entry))
+
         removed = len(self._entries) - len(keep)
 
-        new_index = faiss.IndexFlatIP(EMBED_DIM)
+        new_index = faiss.IndexFlatIP(self.dimension)
         new_id_map: list[str] = []
+
         if keep:
-            vecs = np.vstack([self._encode(e.prompt_norm) for _, e in keep])
-            new_index.add(vecs)
-            new_id_map = [eid for eid, _ in keep]
+            vectors = np.vstack(
+                [
+                    self._vectors[entry_id]
+                    for entry_id, _ in keep
+                ]
+            ).astype(np.float32)
+
+            new_index.add(vectors)
+            new_id_map = [entry_id for entry_id, _ in keep]
 
         self._index = new_index
         self._id_map = new_id_map
-        self._entries = {eid: e for eid, e in keep}
+        self._entries = {
+            entry_id: entry
+            for entry_id, entry in keep
+        }
+        self._vectors = {
+            entry_id: self._vectors[entry_id]
+            for entry_id, _ in keep
+        }
+
         return removed
 
+    def clear(self) -> None:
+        self._index = faiss.IndexFlatIP(self.dimension)
+        self._id_map.clear()
+        self._entries.clear()
+        self._vectors.clear()
+
     def stats(self) -> dict:
-        """Matches paper Eq. 11's index-memory estimate: M_index = 4 * N * d bytes."""
         return {
             "entries": len(self._entries),
-            "index_size_mb": round(self._index.ntotal * EMBED_DIM * 4 / (1024 * 1024), 3),
+            "faiss_vectors": self._index.ntotal,
+            "dimension": self.dimension,
+            "base_threshold": self.tau,
+            "default_ttl_seconds": self.default_ttl,
+            "index_size_mb": round(
+                self._index.ntotal
+                * self.dimension
+                * 4
+                / (1024 * 1024),
+                3,
+            ),
         }

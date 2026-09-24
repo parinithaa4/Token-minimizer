@@ -31,3 +31,21 @@ keys:
     allowed_models: []
     max_usd: 10.0
     cache_enabled: true
+
+semantic_cache:
+  enabled: true
+  threshold: 0.84
+  ttl_seconds: 604800
+  model: sentence-transformers/all-MiniLM-L6-v2
+  k: 8
+
+complexity_routing:
+  enabled: true
+  auto_model: tokenguard-auto
+
+  tier_models:
+    economy: mock-cheap
+    balanced: mock-echo
+    frontier: mock-echo
+
+default_team_id: default
