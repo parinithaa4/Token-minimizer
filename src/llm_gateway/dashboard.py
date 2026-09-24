@@ -22,7 +22,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>llm-gateway · TokenMinGate Dashboard</title>
+<title>llm-gateway · Token Guard Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -144,28 +144,29 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
   /* Auth Screen Modal / Overlay */
   #authView {
-    max-width: 920px; margin: 40px auto;
+    max-width: 440px; margin: 52px auto 80px;
     background: var(--surface); border: 1px solid var(--surface-border);
     border-radius: var(--radius-lg); overflow: hidden;
     box-shadow: 0 24px 64px -12px rgba(0, 0, 0, 0.7);
   }
-  .auth-grid { display: grid; grid-template-columns: 1fr 1.15fr; }
-  .auth-hero {
-    background: linear-gradient(165deg, rgba(52, 231, 255, 0.12), rgba(167, 139, 250, 0.06), #0A0D11);
-    padding: 44px 36px; border-right: 1px solid var(--surface-border);
-    display: flex; flex-direction: column; justify-content: space-between;
+  .auth-card { padding: 36px 32px 28px; }
+  .auth-card-header { text-align: center; margin-bottom: 22px; }
+  .auth-brand-icon {
+    width: 52px; height: 52px; margin: 0 auto 12px;
+    background: rgba(52, 231, 255, 0.08); border: 1px solid rgba(52, 231, 255, 0.25);
+    border-radius: 12px; display: grid; place-items: center;
+    box-shadow: 0 0 20px -4px var(--cyan-glow);
   }
-  .auth-hero h2 { font-family: 'Syne', sans-serif; font-size: 26px; font-weight: 800; line-height: 1.15; margin-bottom: 14px; }
-  .auth-hero p { color: var(--muted); font-size: 13px; line-height: 1.6; }
-  .feature-pills { margin-top: 24px; display: flex; flex-direction: column; gap: 10px; }
-  .pill { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--ink); }
-  .pill-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
-
-  .auth-form-wrap { padding: 40px 36px; }
-  .auth-tabs { display: flex; border-bottom: 1px solid var(--surface-border); margin-bottom: 24px; }
+  .auth-card-header h2 {
+    font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 800;
+    color: var(--ink); letter-spacing: -0.02em; margin-bottom: 4px;
+  }
+  .auth-card-header p { font-size: 13px; color: var(--muted); }
+  .auth-tabs { display: flex; border-bottom: 1px solid var(--surface-border); margin-bottom: 22px; }
   .auth-subtab {
-    padding: 9px 18px; border: none; background: transparent; color: var(--muted);
-    font-size: 13px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent;
+    flex: 1; padding: 10px 0; border: none; background: transparent; color: var(--muted);
+    font-size: 13px; font-weight: 600; cursor: pointer; text-align: center;
+    border-bottom: 2px solid transparent; transition: all 0.15s ease;
   }
   .auth-subtab.active { color: var(--cyan); border-bottom-color: var(--cyan); }
 
@@ -187,16 +188,6 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     box-shadow: 0 0 24px -4px var(--cyan-glow);
   }
   .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
-
-  .demo-users-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
-  .demo-user-card {
-    background: var(--bg-alt); border: 1px solid var(--surface-border); border-radius: var(--radius-sm);
-    padding: 10px 12px; cursor: pointer; text-align: left; transition: all 0.15s ease;
-  }
-  .demo-user-card:hover { border-color: var(--cyan); background: rgba(52, 231, 255, 0.04); transform: translateY(-1px); }
-  .duc-name { font-weight: 600; font-size: 12px; color: var(--ink); }
-  .duc-role { font-size: 10.5px; color: var(--cyan); margin-top: 2px; }
-  .duc-team { font-size: 10px; color: var(--muted); }
 
   /* Gateway Playground Layout */
   .playground-layout { display: grid; grid-template-columns: 1.15fr 1fr; gap: 24px; }
@@ -470,11 +461,11 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   <div class="nav-left">
     <a href="/" class="logo">
       <div class="logo-icon">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
       </div>
       <div class="logo-text">
-        <h1>TokenMinGate</h1>
-        <span>Cost-Cutting LLM Proxy</span>
+        <h1>Token Guard</h1>
+        <span>AI Gateway &amp; Governance</span>
       </div>
     </a>
 
@@ -527,71 +518,63 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   </div>
 
   <!-- ===================================================================== -->
-  <!-- AUTH VIEW (Sign In / Register / Quick Demo) -->
+  <!-- AUTH VIEW (Simple, Clean Token Guard Login / Register) -->
   <!-- ===================================================================== -->
   <section id="authView">
-    <div class="auth-grid">
-      <div class="auth-hero">
-        <div>
-          <h2>TokenMinGate Enterprise</h2>
-          <p>Production AI Gateway for automated model tiering, sub-millisecond semantic caching, and department-level cost governance.</p>
-          <div class="feature-pills">
-            <div class="pill"><span class="pill-dot"></span><span><b>Automated Model Routing:</b> Economy, Balanced &amp; Frontier Tiers</span></div>
-            <div class="pill"><span class="pill-dot"></span><span><b>Semantic Caching:</b> Sub-millisecond similarity retrieval with zero token cost</span></div>
-            <div class="pill"><span class="pill-dot"></span><span><b>Prompt Optimization:</b> Zero-loss compression with syntax protection</span></div>
-            <div class="pill"><span class="pill-dot"></span><span><b>Multi-Tenant Governance:</b> Department budget caps and token quotas</span></div>
-            <div class="pill"><span class="pill-dot"></span><span><b>Dual Database Engine:</b> Supabase Cloud PostgreSQL + Local SQLite failover</span></div>
-          </div>
+    <div class="auth-card">
+      <div class="auth-card-header">
+        <div class="auth-brand-icon">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
         </div>
-        <div style="font-size: 11px; color: var(--dim); margin-top: 30px;">
-          Enterprise Production Architecture &middot; OpenAI Wire Compatible
+        <h2>Token Guard</h2>
+        <p id="authCardSubtitle">Sign in to your employee account</p>
+      </div>
+
+      <div class="auth-tabs">
+        <button class="auth-subtab active" id="tabBtnLogin" onclick="switchAuthTab('login')">Sign In</button>
+        <button class="auth-subtab" id="tabBtnRegister" onclick="switchAuthTab('register')">Register</button>
+      </div>
+
+      <!-- Sign In Form -->
+      <div id="authLoginForm">
+        <form onsubmit="event.preventDefault(); handleLogin();">
+          <div class="form-group">
+            <label>Work Email</label>
+            <input type="email" id="loginEmail" class="form-input" placeholder="name@company.com" value="alice@company.internal" required />
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" id="loginPassword" class="form-input" placeholder="••••••••" value="alice123" required />
+          </div>
+          <button type="submit" class="btn-primary" style="margin-top:8px;">
+            <span>Sign In</span>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </button>
+        </form>
+        <div style="margin-top: 20px; text-align: center; font-size: 12.5px; color: var(--muted);">
+          Don't have an account? <a href="javascript:void(0)" onclick="switchAuthTab('register')" style="color:var(--cyan); font-weight:600; text-decoration:none;">Create one</a>
         </div>
       </div>
 
-      <div class="auth-form-wrap">
-        <div class="auth-tabs">
-          <button class="auth-subtab active" onclick="switchAuthTab('login')">Employee Login</button>
-          <button class="auth-subtab" onclick="switchAuthTab('register')">Register New</button>
-        </div>
-
-        <!-- Quick 1-Click Demo Profiles -->
-        <div style="margin-bottom: 20px;">
-          <span style="font-size: 11px; color: var(--muted); text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em;">1-Click Demo Access</span>
-          <div class="demo-users-grid" id="demoUsersList">
-            <!-- Rendered by JS -->
-          </div>
-        </div>
-
-        <div id="authLoginForm">
-          <div class="form-group">
-            <label>Employee Email</label>
-            <input type="email" id="loginEmail" class="form-input" placeholder="alice@company.internal" value="alice@company.internal" />
-          </div>
-          <div class="form-group">
-            <label>Password</label>
-            <input type="password" id="loginPassword" class="form-input" placeholder="••••••••" value="alice123" />
-          </div>
-          <button class="btn-primary" onclick="handleLogin()">
-            <span>Sign In to TokenMinGate</span>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-          </button>
-        </div>
-
-        <div id="authRegisterForm" style="display:none;">
+      <!-- Register Form -->
+      <div id="authRegisterForm" style="display:none;">
+        <form onsubmit="event.preventDefault(); handleRegister();">
           <div class="form-group">
             <label>Full Name</label>
-            <input type="text" id="regName" class="form-input" placeholder="Sarah Connor" />
+            <input type="text" id="regName" class="form-input" placeholder="Alex Morgan" required />
           </div>
           <div class="form-group">
             <label>Work Email</label>
-            <input type="email" id="regEmail" class="form-input" placeholder="sarah@company.internal" />
+            <input type="email" id="regEmail" class="form-input" placeholder="alex@company.com" required />
           </div>
           <div class="form-group">
             <label>Password</label>
-            <input type="password" id="regPassword" class="form-input" placeholder="••••••••" />
+            <input type="password" id="regPassword" class="form-input" placeholder="••••••••" required />
           </div>
           <div class="form-group">
-            <label>Assigned Team</label>
+            <label>Assigned Department</label>
             <select id="regTeam" class="form-select">
               <option value="support">Customer Support</option>
               <option value="engineering">Core Engineering</option>
@@ -599,9 +582,22 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
               <option value="platform">Platform &amp; AI</option>
             </select>
           </div>
-          <button class="btn-primary" onclick="handleRegister()">Create Employee Account</button>
+          <button type="submit" class="btn-primary" style="margin-top:8px;">
+            <span>Create Account</span>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </button>
+        </form>
+        <div style="margin-top: 20px; text-align: center; font-size: 12.5px; color: var(--muted);">
+          Already have an account? <a href="javascript:void(0)" onclick="switchAuthTab('login')" style="color:var(--cyan); font-weight:600; text-decoration:none;">Sign In</a>
         </div>
       </div>
+
+      <!-- SupaDB Live Status Footnote -->
+      <div style="margin-top:22px; padding-top:14px; border-top:1px solid var(--surface-border); display:flex; align-items:center; justify-content:center; gap:8px; font-size:11px; color:var(--dim);">
+        <span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 6px var(--green);"></span>
+        <span>Connected to SupaDB Cloud (PostgreSQL)</span>
+      </div>
+
     </div>
   </section>
 
@@ -659,7 +655,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           <div class="form-group">
             <label>Target Model</label>
             <select id="modelModeSelect" class="form-select" onchange="onModelSelectChanged()">
-              <option value="tokenmingate" selected>TokenMinGate: Automated Smart Routing (Recommended)</option>
+              <option value="tokenmingate" selected>Token Guard: Automated Smart Routing (Recommended)</option>
               <option value="gpt-4o">OpenAI: GPT-4o (Frontier Model)</option>
               <option value="gpt-4o-mini">OpenAI: GPT-4o Mini (Economy Model)</option>
               <option value="claude-3-5-sonnet">Anthropic: Claude 3.5 Sonnet (Balanced Model)</option>
@@ -672,7 +668,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
         <button class="btn-primary" id="btnSendPrompt" onclick="executeGatewayRequest()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-          <span>Send Request via TokenMinGate</span>
+          <span>Send Request via Token Guard</span>
         </button>
 
         <!-- Summary Savings Strip -->
@@ -998,7 +994,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         <span>Production Architecture Comparison (10,000 Request Benchmark)</span>
         <span class="step-badge badge-hit">Production Benchmark</span>
       </div>
-      <div class="table-desc">Performance, latency, and cost comparison between unmanaged direct LLM APIs and TokenMinGate optimization layers.</div>
+      <div class="table-desc">Performance, latency, and cost comparison between unmanaged direct LLM APIs and Token Guard optimization layers.</div>
       <table class="paper-table" id="tableOneBody">
         <thead>
           <tr>
@@ -1277,13 +1273,14 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   });
 
   function initAuth() {
-    var stored = localStorage.getItem("tokenmingate_user");
+    var stored = localStorage.getItem("tokenguard_user") || localStorage.getItem("tokenmingate_user");
     if (stored) {
       try {
         state.currentUser = JSON.parse(stored);
         showApp();
         return;
       } catch (e) {
+        localStorage.removeItem("tokenguard_user");
         localStorage.removeItem("tokenmingate_user");
       }
     }
@@ -1531,31 +1528,32 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
   function switchAuthTab(type) {
     state.activeAuthTab = type;
-    var subtabs = document.querySelectorAll(".auth-subtab");
-    subtabs[0].classList.toggle("active", type === 'login');
-    subtabs[1].classList.toggle("active", type === 'register');
-    document.getElementById("authLoginForm").style.display = (type === 'login' ? "block" : "none");
-    document.getElementById("authRegisterForm").style.display = (type === 'register' ? "block" : "none");
+    var tabLogin = document.getElementById("tabBtnLogin");
+    var tabReg = document.getElementById("tabBtnRegister");
+    if (tabLogin) tabLogin.classList.toggle("active", type === 'login');
+    if (tabReg) tabReg.classList.toggle("active", type === 'register');
+    var subtitle = document.getElementById("authCardSubtitle");
+    if (subtitle) {
+      subtitle.textContent = (type === 'login' ? "Sign in to your employee account" : "Create your employee account");
+    }
+    var fLogin = document.getElementById("authLoginForm");
+    var fReg = document.getElementById("authRegisterForm");
+    if (fLogin) fLogin.style.display = (type === 'login' ? "block" : "none");
+    if (fReg) fReg.style.display = (type === 'register' ? "block" : "none");
   }
 
   function loadDemoUsers() {
+    var list = document.getElementById("demoUsersList");
+    if (!list) return;
     fetch("/auth/demo-users")
       .then(function(r) { return r.json(); })
       .then(function(users) {
         state.demoUsers = users;
-        var html = users.map(function(u) {
-          return '<button class="demo-user-card" onclick="loginDemo(\'' + u.email + '\')">' +
-            '<div class="duc-name">' + esc(u.name) + '</div>' +
-            '<div class="duc-role">' + esc(u.role).toUpperCase() + '</div>' +
-            '<div class="duc-team">Team: ' + esc(u.team_id) + '</div>' +
-            '</button>';
-        }).join("");
-        document.getElementById("demoUsersList").innerHTML = html;
-      });
+      }).catch(function() {});
   }
 
   window.loginDemo = function(email) {
-    var u = state.demoUsers.find(function(x) { return x.email === email; });
+    var u = state.demoUsers ? state.demoUsers.find(function(x) { return x.email === email; }) : null;
     if (!u) return;
     document.getElementById("loginEmail").value = u.email;
     document.getElementById("loginPassword").value = "demo";
@@ -1563,8 +1561,12 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   };
 
   function handleLogin() {
-    var email = document.getElementById("loginEmail").value;
-    var password = document.getElementById("loginPassword").value;
+    var email = document.getElementById("loginEmail").value.trim();
+    var password = document.getElementById("loginPassword").value.trim();
+    if (!email || !password) {
+      alert("Please enter both email and password");
+      return;
+    }
 
     fetch("/auth/login", {
       method: "POST",
@@ -1577,6 +1579,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     })
     .then(function(user) {
       state.currentUser = user;
+      localStorage.setItem("tokenguard_user", JSON.stringify(user));
       localStorage.setItem("tokenmingate_user", JSON.stringify(user));
       showApp();
     })
@@ -1586,9 +1589,9 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   }
 
   function handleRegister() {
-    var name = document.getElementById("regName").value;
-    var email = document.getElementById("regEmail").value;
-    var password = document.getElementById("regPassword").value;
+    var name = document.getElementById("regName").value.trim();
+    var email = document.getElementById("regEmail").value.trim();
+    var password = document.getElementById("regPassword").value.trim();
     var team_id = document.getElementById("regTeam").value;
 
     if (!name || !email || !password) {
@@ -1607,6 +1610,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     })
     .then(function(user) {
       state.currentUser = user;
+      localStorage.setItem("tokenguard_user", JSON.stringify(user));
       localStorage.setItem("tokenmingate_user", JSON.stringify(user));
       showApp();
     })
@@ -1617,6 +1621,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 
   function signOut() {
     state.currentUser = null;
+    localStorage.removeItem("tokenguard_user");
     localStorage.removeItem("tokenmingate_user");
     showAuth();
   }
@@ -1686,7 +1691,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         '  }\'';
     } else if (lang === "python") {
       code = 'from openai import OpenAI\n\n' +
-        '# Connect seamlessly through TokenMinGate enterprise endpoint\n' +
+        '# Connect seamlessly through Token Guard enterprise endpoint\n' +
         'client = OpenAI(\n' +
         '    base_url="' + host + '/v1",\n' +
         '    api_key="' + apiKey + '"\n' +
@@ -1703,7 +1708,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         '    print("Token Usage:", response.usage)\n';
     } else if (lang === "ts") {
       code = '// Universal TypeScript / JavaScript Fetch Client\n' +
-        'async function callTokenMinGate() {\n' +
+        'async function callTokenGuard() {\n' +
         '  const response = await fetch("' + host + '/v1/chat/completions", {\n' +
         '    method: "POST",\n' +
         '    headers: {\n' +
@@ -1719,7 +1724,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         '  const data = await response.json();\n' +
         '  console.log("Response:", data.choices[0].message.content);\n' +
         '}\n\n' +
-        'callTokenMinGate();';
+        'callTokenGuard();';
     }
 
     var viewer = document.getElementById("snippetCodeViewer");
@@ -1798,7 +1803,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     .then(function(res) {
       renderPipelineExecution(res);
       btn.disabled = false;
-      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg><span>Send Request via TokenMinGate</span>';
+      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg><span>Send Request via Token Guard</span>';
     })
     .catch(function(err) {
       alert("Gateway error: " + err.message);
