@@ -93,7 +93,7 @@ class ComplexityRouter:
             r"\bextract\b",
         ]
 
-        return sum(len(re.findall(pattern, text)) for pattern in patterns)
+        return sum(len(re.findall(pattern, text, re.IGNORECASE)) for pattern in patterns)
 
     @staticmethod
     def _count_reasoning_signals(text: str) -> int:
@@ -113,7 +113,7 @@ class ComplexityRouter:
             r"\bimplications?\b",
         ]
 
-        return sum(len(re.findall(pattern, text)) for pattern in patterns)
+        return sum(len(re.findall(pattern, text, re.IGNORECASE)) for pattern in patterns)
 
     @staticmethod
     def _code_signal(text: str) -> float:
@@ -170,12 +170,14 @@ class ComplexityRouter:
 
         score = max(0.0, min(1.0, score))
 
-        if score < 0.35:
-            tier = "economy"
-        elif score < 0.75:
+        # Paper Section VII-B (Staying Safe When Routing):
+        # Prompts with code or strong reasoning skip the cheap tier completely.
+        if score >= 0.75:
+            tier = "frontier"
+        elif score >= 0.35 or code_signal > 0 or reasoning_signal >= 0.5:
             tier = "balanced"
         else:
-            tier = "frontier"
+            tier = "economy"
 
         return ComplexityResult(
             score=round(score, 6),

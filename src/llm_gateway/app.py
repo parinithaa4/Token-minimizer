@@ -1,17 +1,30 @@
-"""FastAPI application: OpenAI-compatible endpoints + admin observability.
+"""FastAPI application: OpenAI-compatible endpoints + TokenMinGate employee application.
 
 Endpoints:
-  POST /v1/chat/completions   — OpenAI-compatible chat completions (non-stream)
+  POST /v1/chat/completions   — OpenAI-compatible chat completions (non-stream & SSE stream)
   GET  /v1/models             — list routed models (OpenAI shape)
   GET  /admin/usage           — per-key usage, budget remaining, cache-hit rate
+  GET  /admin/pricing         — active pricing table
   GET  /healthz               — liveness
-
-Auth: clients send ``Authorization: Bearer <vkey>``. The vkey is resolved
-against the store; missing/invalid → 401.
-
-Gateway metadata (cache hit, cost, JTF savings) is exposed both as response
-headers (``X-Cache``, ``X-Cost-USD``, ``X-JTF-*``) and inside
-``response["usage"]["gateway"]`` so SDK users get it without reading headers.
+  GET  /                      — Unified TokenMinGate Employee Application
+  GET  /dashboard             — TokenMinGate Dashboard
+  
+TokenMinGate Application & SupaDB Endpoints:
+  POST /auth/login            — Employee authentication
+  POST /auth/register         — Employee registration
+  GET  /auth/demo-users       — List 1-click demo profiles
+  GET  /auth/me               — Get current employee profile
+  POST /api/chat/pipeline     — Execute Algorithm 1 with full step-by-step trace
+  POST /api/cache/feedback    — Mark L2 cache answer accurate / wrong (updates P & TRRnet)
+  GET  /api/metrics/research-summary — Paper Tables I, II, III and KPI calculations
+  GET  /api/ledger            — Filterable request audit trail
+  GET  /api/cache/entries     — Inspect L2 cache entries & current effective tau
+  POST /api/cache/simulate-age — Simulate answer aging to observe dynamic tau_eff rise
+  POST /api/cache/evict       — Evict specific cache entry
+  POST /api/cache/purge       — Purge expired cache entries
+  GET  /api/db/status         — SupaDB / Supabase engine status
+  POST /api/db/sync-supabase  — Synchronize local data to Supabase cloud
+  GET  /api/db/schema.sql     — View Supabase SQL migration script
 """
 
 from __future__ import annotations
@@ -22,9 +35,12 @@ import os
 import time
 import uuid
 from collections.abc import AsyncIterator
+from pathlib import Path
+from typing import Any
 
-from fastapi import Depends, FastAPI, Header, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi import Depends, FastAPI, Header, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from pydantic import BaseModel
 
 from .cache import build_cache
 from .config import GatewayConfig, load_config
@@ -39,8 +55,54 @@ from .schemas import (
     ModelList,
 )
 from .store import KeyUsage, Store, VirtualKey
+from .supadb import SupaDB
 
 log = logging.getLogger("llm_gateway")
+
+
+# --- Request & Response Models for TokenMinGate Application ---
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class RegisterRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+    team_id: str = "support"
+
+
+class PipelineChatRequest(BaseModel):
+    model: str = "tokenmingate"
+    messages: list[dict[str, Any]]
+    team_id: str | None = None
+    user_id: str | None = None
+    app_id: str | None = "web"
+    ttl_seconds: float = 604800.0
+    tau: float = 0.84
+    temperature: float = 0.0
+
+
+class FeedbackRequest(BaseModel):
+    log_id: int
+    is_wrong_answer: bool
+    notes: str | None = None
+
+
+class SimulateAgeRequest(BaseModel):
+    entry_id: str
+    age_seconds: float
+
+
+class EvictCacheRequest(BaseModel):
+    entry_id: str
+
+
+class SyncSupabaseRequest(BaseModel):
+    supabase_url: str
+    supabase_key: str
 
 
 def _error_response(status: int, message: str, err_type: str, code: str | None = None):
@@ -49,7 +111,6 @@ def _error_response(status: int, message: str, err_type: str, code: str | None =
 
 
 def _sse_event(obj: dict) -> str:
-    """Format one OpenAI-style SSE frame: ``data: {json}\\n\\n``."""
     return "data: " + json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n\n"
 
 
@@ -61,7 +122,6 @@ def _chunk_obj(
     delta: dict,
     finish_reason: str | None = None,
 ) -> dict:
-    """Build an OpenAI ``chat.completion.chunk`` object."""
     return {
         "id": stream_id,
         "object": "chat.completion.chunk",
@@ -72,25 +132,15 @@ def _chunk_obj(
 
 
 async def _sse_from_chunks(agen, *, model: str) -> AsyncIterator[str]:
-    """Translate normalized gateway :class:`StreamChunk`s into OpenAI SSE text.
-
-    Emits, in order: a role-priming chunk, one chunk per content delta, a final
-    chunk with ``finish_reason`` (and usage when available), then the
-    ``data: [DONE]`` sentinel. Stepping this generator once drives the gateway's
-    budget pre-check before any frame is produced.
-    """
     stream_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
 
-    # Pull the first gateway chunk first — this triggers validation + the budget
-    # pre-check inside ``chat_completion_stream`` (may raise GatewayError).
     aiter = agen.__aiter__()
     try:
         first = await aiter.__anext__()
     except StopAsyncIteration:
         first = None
 
-    # Role-priming frame (OpenAI sends an initial delta with just the role).
     yield _sse_event(
         _chunk_obj(stream_id, created, model, delta={"role": "assistant"})
     )
@@ -130,7 +180,6 @@ async def _sse_from_chunks(agen, *, model: str) -> AsyncIterator[str]:
             if frame is not None:
                 yield frame
 
-    # Terminal chunk: empty delta + finish_reason, plus usage when known.
     final = _chunk_obj(
         stream_id, created, model, delta={}, finish_reason=finish_reason or "stop"
     )
@@ -141,14 +190,12 @@ async def _sse_from_chunks(agen, *, model: str) -> AsyncIterator[str]:
 
 
 async def _prepend(first: str, rest: AsyncIterator[str]) -> AsyncIterator[str]:
-    """Yield an already-fetched first frame, then the remainder of ``rest``."""
     yield first
     async for item in rest:
         yield item
 
 
 def seed_store_from_config(store: Store, config: GatewayConfig) -> None:
-    """Insert configured virtual keys into the store (idempotent upsert)."""
     for k in config.keys:
         store.upsert_key(
             VirtualKey(
@@ -163,14 +210,7 @@ def seed_store_from_config(store: Store, config: GatewayConfig) -> None:
 
 
 def create_app(config: GatewayConfig | None = None) -> FastAPI:
-    """Application factory.
-
-    Defaults to an **in-memory** SQLite store so a fresh app (and every test)
-    starts clean with the mock provider. A real deployment passes a config with
-    a file-backed ``database_url`` and real providers.
-    """
     config = config or load_config()
-    # Tests and zero-config runs use an in-memory DB unless told otherwise.
     db_url = config.database_url
     if os.environ.get("GATEWAY_TEST_MODE") == "1":
         db_url = "sqlite:///:memory:"
@@ -179,18 +219,20 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     seed_store_from_config(store, config)
     cache = build_cache(config.redis_url)
     pricing = PricingTable()
-    gateway = Gateway(config, store, cache, pricing)
+    supadb = SupaDB(database_url=db_url, connection=store._conn)
+    gateway = Gateway(config, store, cache, pricing, supadb=supadb)
 
     app = FastAPI(
-        title="llm-gateway",
-        version="0.1.0",
-        description="Token-frugal, self-hostable OpenAI-compatible LLM gateway.",
+        title="TokenMinGate LLM Gateway",
+        version="0.2.0",
+        description="Cost-cutting LLM gateway with semantic caching, age-aware validation, and model routing.",
     )
     app.state.gateway = gateway
     app.state.store = store
     app.state.config = config
     app.state.cache = cache
     app.state.pricing = pricing
+    app.state.supadb = supadb
 
     # ----- auth dependency --------------------------------------------------
 
@@ -200,13 +242,26 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         if not authorization or not authorization.lower().startswith("bearer "):
             raise GatewayError(
                 401,
-                "missing or malformed Authorization header "
-                "(expected 'Bearer <key>')",
+                "missing or malformed Authorization header (expected 'Bearer <key>')",
                 "authentication_error",
                 code="invalid_api_key",
             )
         token = authorization.split(" ", 1)[1].strip()
         vkey = store.get_key(token)
+        if vkey is None:
+            # Check supadb registered employees
+            emp = supadb.get_employee_by_key(token)
+            if emp:
+                vkey = VirtualKey(
+                    key=emp.api_key,
+                    name=emp.name,
+                    allowed_models=[],
+                    max_usd=100.0,
+                    max_tokens=1_000_000,
+                    cache_enabled=True,
+                )
+                store.upsert_key(vkey)
+
         if vkey is None:
             raise GatewayError(
                 401, "invalid API key", "authentication_error", code="invalid_api_key"
@@ -219,11 +274,15 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     async def _gw_error_handler(_request: Request, exc: GatewayError):
         return _error_response(exc.status_code, exc.message, exc.err_type, exc.code)
 
-    # ----- endpoints --------------------------------------------------------
+    # ----- Core OpenAI-compatible endpoints ---------------------------------
 
     @app.get("/healthz")
     async def healthz():
-        return {"status": "ok", "models": gateway.available_models()}
+        return {
+            "status": "ok",
+            "models": gateway.available_models(),
+            "supadb_mode": supadb.get_status()["mode"],
+        }
 
     @app.get("/v1/models", response_model=ModelList)
     async def list_models(_vkey: VirtualKey = Depends(require_key)):
@@ -240,10 +299,8 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
     ):
         payload = body.model_dump(exclude_none=True)
         jtf_compress = (x_jtf_compress or "").strip().lower() in ("1", "true", "yes")
-        # Per-request cache override: X-Cache: no-store disables caching.
         cache_enabled = (x_cache or "").strip().lower() not in ("no-store", "off", "false")
 
-        # --- Streaming path (OpenAI-style SSE). ---
         if body.stream:
             sse = _sse_from_chunks(
                 gateway.chat_completion_stream(
@@ -251,10 +308,6 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
                 ),
                 model=body.model,
             )
-            # Drive the generator once *before* returning the response. This runs
-            # validation + the budget pre-check (which may raise GatewayError →
-            # 402) so an over-budget request never produces a partial stream. The
-            # already-fetched first frame is replayed by ``_prepend``.
             first_frame = await sse.__anext__()
             return StreamingResponse(
                 _prepend(first_frame, sse),
@@ -269,21 +322,24 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
             jtf_compress=jtf_compress,
         )
 
-        # Embed gateway metadata inside usage so SDK users see it without headers.
         response = dict(result.response)
         usage = dict(response.get("usage", {}))
         usage["gateway"] = {
             "cache_hit": result.cache_hit,
+            "cache_tier": result.cache_tier,
             "cost_usd": round(result.cost_usd, 8),
             "provider": result.provider,
+            "tier": result.tier,
             "jtf": result.jtf,
         }
         response["usage"] = usage
 
         headers = {
             "X-Cache": "HIT" if result.cache_hit else "MISS",
+            "X-Cache-Tier": result.cache_tier or "NONE",
             "X-Cost-USD": f"{result.cost_usd:.8f}",
             "X-Provider": result.provider,
+            "X-Tier": result.tier,
             "X-JTF-Potential-Tokens-Saved": str(
                 result.jtf.get("potential_tokens_saved", 0)
             ),
@@ -291,11 +347,251 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         }
         return JSONResponse(content=response, headers=headers)
 
+    # ----- Employee Authentication Endpoints --------------------------------
+
+    @app.post("/auth/login")
+    async def auth_login(req: LoginRequest):
+        emp = supadb.authenticate(req.email, req.password)
+        if not emp:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid work email or password"},
+            )
+        # Ensure key in memory store
+        store.upsert_key(
+            VirtualKey(
+                key=emp.api_key,
+                name=emp.name,
+                allowed_models=[],
+                max_usd=100.0,
+                max_tokens=1_000_000,
+                cache_enabled=True,
+            )
+        )
+        return {
+            "id": emp.id,
+            "email": emp.email,
+            "name": emp.name,
+            "role": emp.role,
+            "team_id": emp.team_id,
+            "app_id": emp.app_id,
+            "api_key": emp.api_key,
+        }
+
+    @app.post("/auth/register")
+    async def auth_register(req: RegisterRequest):
+        try:
+            emp = supadb.register_employee(
+                email=req.email,
+                password=req.password,
+                name=req.name,
+                team_id=req.team_id,
+            )
+            store.upsert_key(
+                VirtualKey(
+                    key=emp.api_key,
+                    name=emp.name,
+                    allowed_models=[],
+                    max_usd=100.0,
+                    max_tokens=1_000_000,
+                    cache_enabled=True,
+                )
+            )
+            return {
+                "id": emp.id,
+                "email": emp.email,
+                "name": emp.name,
+                "role": emp.role,
+                "team_id": emp.team_id,
+                "api_key": emp.api_key,
+            }
+        except Exception as e:
+            return JSONResponse(
+                status_code=400, content={"detail": f"Registration failed: {e}"}
+            )
+
+    @app.get("/auth/demo-users")
+    async def auth_demo_users():
+        return supadb.list_employees()
+
+    @app.get("/auth/me")
+    async def auth_me(vkey: VirtualKey = Depends(require_key)):
+        emp = supadb.get_employee_by_key(vkey.key)
+        if emp:
+            return {
+                "id": emp.id,
+                "email": emp.email,
+                "name": emp.name,
+                "role": emp.role,
+                "team_id": emp.team_id,
+                "api_key": emp.api_key,
+            }
+        return {"name": vkey.name, "api_key": vkey.key, "team_id": "platform", "role": "developer"}
+
+    # ----- Interactive Gateway Pipeline Execution ---------------------------
+
+    @app.post("/api/chat/pipeline")
+    async def api_chat_pipeline(
+        req: PipelineChatRequest,
+        vkey: VirtualKey = Depends(require_key),
+    ):
+        if req.tau:
+            gateway.semantic_cache.tau = float(req.tau)
+
+        payload = {
+            "model": req.model,
+            "messages": req.messages,
+            "team_id": req.team_id or "default",
+            "user_id": req.user_id or vkey.name,
+            "app_id": req.app_id or "web",
+            "ttl_seconds": req.ttl_seconds,
+            "temperature": req.temperature,
+        }
+
+        result = await gateway.chat_completion(
+            vkey=vkey,
+            payload=payload,
+            cache_enabled=True,
+            jtf_compress=False,
+        )
+
+        user_content = " ".join(
+            str(m.get("content", "")) for m in req.messages if m.get("role") == "user"
+        )
+        delta_c = (
+            ((result.baseline_cost_usd - result.cost_usd) / result.baseline_cost_usd * 100)
+            if result.baseline_cost_usd > 0
+            else 0.0
+        )
+
+        pipeline_trace = {
+            "namespace": {
+                "hash": result.namespace,
+                "team_id": payload["team_id"],
+                "provider": result.provider,
+                "temperature": req.temperature,
+            },
+            "l1_cache": {
+                "checked": True,
+                "hit": result.cache_tier == "l1",
+                "saved_tokens": result.tokens_saved if result.cache_tier == "l1" else 0,
+            },
+            "l2_cache": {
+                "checked": result.cache_tier != "l1",
+                "hit": result.cache_tier == "l2",
+                "similarity": result.similarity,
+                "effective_threshold": result.effective_threshold,
+                "base_threshold": gateway.semantic_cache.tau,
+                "age_seconds": 0.0,
+                "ttl_seconds": req.ttl_seconds,
+            },
+            "pruning": {
+                "original_tokens": result.prompt_tokens + result.tokens_saved,
+                "pruned_tokens": result.pruned_tokens,
+                "tokens_saved": result.tokens_saved if not result.cache_hit else 0,
+                "reduction_pct": round(
+                    (result.tokens_saved / (result.prompt_tokens + result.tokens_saved) * 100)
+                    if (result.prompt_tokens + result.tokens_saved) > 0
+                    else 0.0,
+                    1,
+                ),
+            },
+            "complexity": {
+                "score": result.complexity_score,
+                "tier": result.tier,
+                "model": result.model,
+                "signals": result.complexity_signals,
+            },
+            "savings": {
+                "tokens_used": result.prompt_tokens + result.completion_tokens,
+                "tokens_saved": result.tokens_saved,
+                "cost_usd": result.cost_usd,
+                "baseline_cost_usd": result.baseline_cost_usd,
+                "delta_c_pct": round(delta_c, 1),
+                "latency_ms": result.latency_ms,
+            },
+            "tier": result.tier,
+            "log_id": result.log_id,
+        }
+
+        return {
+            "choices": result.response.get("choices", []),
+            "usage": result.response.get("usage", {}),
+            "cache_hit": result.cache_hit,
+            "pipeline": pipeline_trace,
+        }
+
+    # ----- Cache Feedback & Management --------------------------------------
+
+    @app.post("/api/cache/feedback")
+    async def api_cache_feedback(req: FeedbackRequest):
+        ok = supadb.update_feedback(req.log_id, req.is_wrong_answer, req.notes)
+        return {"success": ok}
+
+    @app.get("/api/cache/entries")
+    async def api_cache_entries():
+        return gateway.semantic_cache.list_entries()
+
+    @app.post("/api/cache/simulate-age")
+    async def api_cache_simulate_age(req: SimulateAgeRequest):
+        eff_tau = gateway.semantic_cache.simulate_age(req.entry_id, req.age_seconds)
+        return {"effective_threshold": eff_tau}
+
+    @app.post("/api/cache/evict")
+    async def api_cache_evict(req: EvictCacheRequest):
+        ok = gateway.semantic_cache.evict(req.entry_id)
+        return {"success": ok}
+
+    @app.post("/api/cache/purge")
+    async def api_cache_purge():
+        removed = gateway.semantic_cache.purge_expired()
+        return {"removed": removed}
+
+    @app.post("/api/cache/clear")
+    async def api_cache_clear():
+        gateway.semantic_cache.clear()
+        gateway.cache.clear()
+        return {"success": True}
+
+    # ----- Observability & Paper Research Metrics ---------------------------
+
+    @app.get("/api/metrics/research-summary")
+    async def api_research_summary():
+        return supadb.calculate_research_metrics()
+
+    @app.get("/api/ledger")
+    async def api_ledger(
+        limit: int = Query(default=50, ge=1, le=200),
+        offset: int = Query(default=0, ge=0),
+        team_id: str | None = None,
+        user_id: str | None = None,
+        tier: str | None = None,
+        search: str | None = None,
+    ):
+        rows, total = supadb.get_ledger(limit, offset, team_id, user_id, tier, search)
+        return {"rows": rows, "total": total}
+
+    # ----- SupaDB Engine & Sync ---------------------------------------------
+
+    @app.get("/api/db/status")
+    async def api_db_status():
+        return supadb.get_status()
+
+    @app.post("/api/db/sync-supabase")
+    async def api_sync_supabase(req: SyncSupabaseRequest):
+        res = supadb.sync_to_supabase(req.supabase_url, req.supabase_key)
+        return res
+
+    @app.get("/api/db/schema.sql")
+    async def api_schema_sql():
+        schema_path = Path(__file__).parent.parent.parent / "supabase_schema.sql"
+        if schema_path.exists():
+            return PlainTextResponse(schema_path.read_text(encoding="utf-8"))
+        return PlainTextResponse("-- supabase_schema.sql not found on disk")
+
+    # ----- Admin Endpoints (compatible with original quickstart) ------------
+
     def _require_admin(request: Request) -> None:
-        """Optional admin gate. If ``config.admin_token`` is set, require it via
-        ``X-Admin-Token`` header or ``?admin_token=`` query (the dashboard uses
-        the latter). When unset, ``/admin/*`` stays open for the quickstart.
-        """
         token = config.admin_token
         if not token:
             return
@@ -304,18 +600,14 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         )
         if supplied != token:
             raise GatewayError(
-                401, "invalid or missing admin token", "authentication_error",
+                401,
+                "invalid or missing admin token",
+                "authentication_error",
                 code="invalid_admin_token",
             )
 
     @app.get("/admin/usage")
     async def admin_usage(request: Request):
-        """Per-key observability snapshot + portfolio totals.
-
-        Self-hosted/internal. If ``admin_token`` is configured it must be
-        supplied (header ``X-Admin-Token`` or ``?admin_token=``); otherwise the
-        endpoint is open so the quickstart and dashboard work out of the box.
-        """
         _require_admin(request)
         keys = store.list_keys()
         out = []
@@ -385,14 +677,9 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         _require_admin(request)
         return {"prices_per_mtok_usd": pricing.as_dict()}
 
+    @app.get("/", response_class=HTMLResponse)
     @app.get("/dashboard", response_class=HTMLResponse)
-    async def dashboard():
-        """Serve the self-contained admin dashboard (inline HTML/CSS/JS).
-
-        The page fetches ``/admin/usage`` client-side and renders totals +
-        per-key cards. If ``admin_token`` is configured, append it to the URL as
-        ``/dashboard?admin_token=...`` — the page forwards it to the fetch.
-        """
+    async def serve_dashboard():
         return HTMLResponse(content=DASHBOARD_HTML)
 
     return app
@@ -404,5 +691,4 @@ def _mask(key: str) -> str:
     return f"{key[:6]}...{key[-2:]}"
 
 
-# Module-level ASGI app for ``uvicorn llm_gateway.app:app``.
 app = create_app()

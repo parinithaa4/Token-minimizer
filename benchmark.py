@@ -19,10 +19,10 @@ import argparse
 import random
 import time
 
-from semantic_cache import SemanticCache
-from complexity_router import ComplexityRouter
-from namespace import namespace_for_request, normalize_prompt
-from metrics import RequestRecord, summarize
+from llm_gateway.semantic_cache import SemanticCache
+from llm_gateway.complexity_router import ComplexityRouter
+from llm_gateway.namespace import namespace_for_request, normalize_prompt
+from llm_gateway.metrics import RequestRecord, summarize
 
 
 BASE_QUESTIONS = [
