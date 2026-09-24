@@ -12,3 +12,9 @@ build/
 *.sqlite3
 .env
 _ref/
+
+.env
+*.db
+data/
+__pycache__/
+venv/
