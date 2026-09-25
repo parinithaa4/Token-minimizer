@@ -181,7 +181,36 @@ class GatewayConfig:
         self,
         model: str,
     ) -> RouteConfig | None:
-        return self.routes.get(model)
+        if model in self.routes:
+            return self.routes[model]
+
+        if not model:
+            return None
+
+        # Dynamic fallback for common model families if provider is configured
+        if model.startswith("gemini-") and "gemini" in self.providers:
+            return RouteConfig(
+                model=model,
+                provider="gemini",
+                upstream_model=model,
+                fallback="mock-cheap" if "mock-cheap" in self.routes else None,
+            )
+        if (model.startswith("gpt-") or model.startswith("o1-") or model.startswith("o3-")) and "openai" in self.providers:
+            return RouteConfig(
+                model=model,
+                provider="openai",
+                upstream_model=model,
+                fallback="mock-echo" if "mock-echo" in self.routes else None,
+            )
+        if model.startswith("claude-") and "anthropic" in self.providers:
+            return RouteConfig(
+                model=model,
+                provider="anthropic",
+                upstream_model=model,
+                fallback="mock-echo" if "mock-echo" in self.routes else None,
+            )
+
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -192,14 +221,28 @@ class GatewayConfig:
 def default_config() -> GatewayConfig:
     """Return a zero-config development configuration.
 
-    The default path uses only the built-in mock provider. This keeps the
-    existing test suite and local smoke tests independent of external APIs.
+    Includes standard model routes with safe mock fallbacks when API keys are not set.
     """
 
     providers = {
         "mock": ProviderConfig(
             name="mock",
             type="mock",
+        ),
+        "gemini": ProviderConfig(
+            name="gemini",
+            type="gemini",
+            api_key_env="GEMINI_API_KEY",
+        ),
+        "openai": ProviderConfig(
+            name="openai",
+            type="openai",
+            api_key_env="OPENAI_API_KEY",
+        ),
+        "anthropic": ProviderConfig(
+            name="anthropic",
+            type="anthropic",
+            api_key_env="ANTHROPIC_API_KEY",
         ),
     }
 
@@ -213,6 +256,48 @@ def default_config() -> GatewayConfig:
             model="mock-cheap",
             provider="mock",
             upstream_model="mock-cheap",
+        ),
+        "gemini-1.5-flash": RouteConfig(
+            model="gemini-1.5-flash",
+            provider="gemini",
+            upstream_model="gemini-1.5-flash",
+            fallback="mock-cheap",
+        ),
+        "gemini-1.5-pro": RouteConfig(
+            model="gemini-1.5-pro",
+            provider="gemini",
+            upstream_model="gemini-1.5-pro",
+            fallback="mock-echo",
+        ),
+        "gemini-2.0-flash": RouteConfig(
+            model="gemini-2.0-flash",
+            provider="gemini",
+            upstream_model="gemini-2.0-flash",
+            fallback="mock-cheap",
+        ),
+        "gpt-4o": RouteConfig(
+            model="gpt-4o",
+            provider="openai",
+            upstream_model="gpt-4o",
+            fallback="mock-echo",
+        ),
+        "gpt-4o-mini": RouteConfig(
+            model="gpt-4o-mini",
+            provider="openai",
+            upstream_model="gpt-4o-mini",
+            fallback="mock-cheap",
+        ),
+        "claude-3-5-sonnet": RouteConfig(
+            model="claude-3-5-sonnet",
+            provider="anthropic",
+            upstream_model="claude-3-5-sonnet-20241022",
+            fallback="mock-echo",
+        ),
+        "claude-3-5-haiku": RouteConfig(
+            model="claude-3-5-haiku",
+            provider="anthropic",
+            upstream_model="claude-3-5-haiku-20241022",
+            fallback="mock-cheap",
         ),
     }
 
@@ -396,9 +481,19 @@ def load_config(
     A missing configuration file falls back to the built-in mock setup.
     """
 
-    path = path or os.environ.get(
-        "GATEWAY_CONFIG"
-    )
+    path = path or os.environ.get("GATEWAY_CONFIG")
+
+    if not path:
+        candidates = [
+            Path("config.yaml"),
+            Path.cwd() / "config.yaml",
+            Path("/app/config.yaml"),
+            Path(__file__).resolve().parent.parent.parent / "config.yaml",
+        ]
+        for c in candidates:
+            if c.exists():
+                path = str(c)
+                break
 
     if not path:
         return default_config()
