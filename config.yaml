@@ -5,6 +5,11 @@ cache:
   ttl_seconds: 3600
 
 providers:
+  gemini:
+    type: openai
+    base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+    api_key_env: GEMINI_API_KEY
+
   openai:
     type: openai
     base_url: "https://api.openai.com/v1"
@@ -23,7 +28,11 @@ providers:
     type: mock
 
 routing:
-  # Real-world cloud & local enterprise model routes
+  gemini-1.5-flash:
+    provider: gemini
+    upstream_model: gemini-1.5-flash
+    fallback: mock-cheap
+
   gpt-4o:
     provider: openai
     upstream_model: gpt-4o
@@ -44,17 +53,11 @@ routing:
     upstream_model: claude-3-5-haiku-20241022
     fallback: mock-cheap
 
-  gemini-1.5-flash:
-    provider: openai
-    upstream_model: gemini-1.5-flash
-    fallback: mock-cheap
-
   llama-3.1:
     provider: ollama
     upstream_model: llama3.1:8b
     fallback: mock-cheap
 
-  # Offline/simulation fallbacks
   mock-echo:
     provider: mock
     upstream_model: mock-echo
@@ -82,8 +85,8 @@ complexity_routing:
   auto_model: tokenmingate
 
   tier_models:
-    economy: gpt-4o-mini
-    balanced: claude-3-5-sonnet
-    frontier: gpt-4o
+    economy: gemini-1.5-flash
+    balanced: gemini-1.5-flash
+    frontier: gemini-1.5-flash
 
 default_team_id: platform
