@@ -21,6 +21,12 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
+try:
     import yaml
 except Exception:  # pragma: no cover - yaml is a hard dependency
     yaml = None
@@ -34,7 +40,7 @@ except Exception:  # pragma: no cover - yaml is a hard dependency
 @dataclass
 class ProviderConfig:
     name: str
-    type: str  # "mock" | "openai" | "anthropic" | "ollama"
+    type: str  # "mock" | "openai" | "anthropic" | "gemini" | "ollama"
     base_url: str | None = None
     api_key: str | None = None
     api_key_env: str | None = None
@@ -44,12 +50,31 @@ class ProviderConfig:
         """Resolve the provider API key.
 
         A literal api_key takes precedence over an environment variable.
+        Also falls back to standard provider environment variable names.
         """
-        if self.api_key:
+        if self.api_key and not self.api_key.startswith("your-"):
             return self.api_key
 
         if self.api_key_env:
-            return os.environ.get(self.api_key_env)
+            val = os.environ.get(self.api_key_env)
+            if val and not val.startswith("your-"):
+                return val
+
+        if self.type == "gemini":
+            for env_var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"):
+                val = os.environ.get(env_var)
+                if val and not val.startswith("your-"):
+                    return val
+
+        if self.type == "openai":
+            val = os.environ.get("OPENAI_API_KEY")
+            if val and not val.startswith("your-"):
+                return val
+
+        if self.type == "anthropic":
+            val = os.environ.get("ANTHROPIC_API_KEY")
+            if val and not val.startswith("your-"):
+                return val
 
         return None
 

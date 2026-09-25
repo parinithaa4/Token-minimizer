@@ -6,7 +6,7 @@ cache:
 
 providers:
   gemini:
-    type: openai
+    type: gemini
     base_url: "https://generativelanguage.googleapis.com/v1beta/openai"
     api_key_env: GEMINI_API_KEY
 
@@ -31,6 +31,16 @@ routing:
   gemini-1.5-flash:
     provider: gemini
     upstream_model: gemini-1.5-flash
+    fallback: mock-cheap
+
+  gemini-1.5-pro:
+    provider: gemini
+    upstream_model: gemini-1.5-pro
+    fallback: mock-echo
+
+  gemini-2.0-flash:
+    provider: gemini
+    upstream_model: gemini-2.0-flash
     fallback: mock-cheap
 
   gpt-4o:
@@ -82,11 +92,11 @@ semantic_cache:
 
 complexity_routing:
   enabled: true
-  auto_model: tokenmingate
+  auto_model: tokenguard-auto
 
   tier_models:
     economy: gemini-1.5-flash
-    balanced: gemini-1.5-flash
-    frontier: gemini-1.5-flash
+    balanced: gemini-1.5-pro
+    frontier: gemini-1.5-pro
 
 default_team_id: platform

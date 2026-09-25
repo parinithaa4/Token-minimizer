@@ -20,11 +20,61 @@ import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Optional
 
 import httpx
 
 log = logging.getLogger("llm_gateway.supadb")
+
+
+def persist_env_vars(env_dict: dict[str, str], env_path: str | Path | None = None) -> bool:
+    """Safely updates or appends environment variables to the project's .env file and os.environ."""
+    for k, v in env_dict.items():
+        if v is not None:
+            os.environ[k] = str(v)
+
+    if env_path is None:
+        cwd_env = Path.cwd() / ".env"
+        if cwd_env.exists():
+            target_file = cwd_env
+        elif Path("/app/.env").exists():
+            target_file = Path("/app/.env")
+        else:
+            target_file = cwd_env
+    else:
+        target_file = Path(env_path)
+
+    try:
+        lines = []
+        if target_file.exists():
+            content = target_file.read_text(encoding="utf-8")
+            lines = content.splitlines()
+
+        new_lines = []
+        keys_written = set()
+        for line in lines:
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and "=" in stripped:
+                k, _ = stripped.split("=", 1)
+                k = k.strip()
+                if k in env_dict and env_dict[k] is not None:
+                    new_lines.append(f"{k}={env_dict[k]}")
+                    keys_written.add(k)
+                else:
+                    new_lines.append(line)
+            else:
+                new_lines.append(line)
+
+        for k, v in env_dict.items():
+            if v is not None and k not in keys_written:
+                new_lines.append(f"{k}={v}")
+
+        target_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        return True
+    except (PermissionError, OSError) as e:
+        log.warning(f"Could not persist environment variables to {target_file}: {e}")
+        return False
 
 
 @dataclass
@@ -148,8 +198,13 @@ class SupaDB:
         except Exception:
             pass
         self.supabase_url = os.environ.get("SUPABASE_URL", "https://eloedezdxtvpkdxebzkc.supabase.co").rstrip("/")
-        self.supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_KEY", "sb_live_service_role_secret")
+        raw_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_KEY") or ""
+        if raw_key in ("sb_live_service_role_secret", "your-service-role-key-here") or raw_key.startswith("your-"):
+            raw_key = ""
+        self.supabase_key = raw_key
         self.is_supabase_active = bool(self.supabase_url and self.supabase_key)
+        self._last_conn_check: dict | None = None
+        self._last_conn_check_time: float = 0.0
 
         db_path = database_url or os.environ.get("GATEWAY_DATABASE_URL", "llm_gateway.db")
         if db_path.startswith("sqlite:///"):
@@ -795,10 +850,100 @@ class SupaDB:
 
     # ----- Supabase Integration & Sync --------------------------------------
 
+    def check_connection(self, url: str | None = None, key: str | None = None) -> dict:
+        """Probe the Supabase host to verify credentials and table schemas."""
+        target_url = (url or self.supabase_url or "").rstrip("/")
+        target_key = (key or self.supabase_key or "").strip()
+
+        if not target_url:
+            return {
+                "connected": False,
+                "status": "no_url",
+                "message": "Supabase project URL is not configured.",
+                "tables_ready": False,
+            }
+        if not target_key or target_key.startswith("sb_live_service_role_secret") or target_key.startswith("your-"):
+            return {
+                "connected": False,
+                "status": "key_required",
+                "message": "Supabase API key is missing. Please provide your Supabase Service Role Key or Anon Key.",
+                "tables_ready": False,
+            }
+
+        headers = {
+            "apikey": target_key,
+            "Authorization": f"Bearer {target_key}",
+        }
+
+        try:
+            with httpx.Client(timeout=6.0) as client:
+                r = client.get(f"{target_url}/rest/v1/", headers=headers)
+                if r.status_code in (401, 403):
+                    return {
+                        "connected": False,
+                        "status": "unauthorized",
+                        "message": f"Supabase authorization failed (HTTP {r.status_code}): Invalid API key. Check Project Settings -> API in your Supabase dashboard.",
+                        "tables_ready": False,
+                    }
+                if r.status_code >= 400:
+                    return {
+                        "connected": False,
+                        "status": "error",
+                        "message": f"Supabase returned HTTP {r.status_code}: {r.text[:200]}",
+                        "tables_ready": False,
+                    }
+
+                # Root rest/v1 responded 200, now verify if tables exist
+                r_teams = client.get(f"{target_url}/rest/v1/teams?limit=1", headers=headers)
+                if r_teams.status_code == 200:
+                    return {
+                        "connected": True,
+                        "status": "connected",
+                        "message": "Connected to Supabase Cloud PostgreSQL! All database tables verified.",
+                        "tables_ready": True,
+                    }
+                else:
+                    return {
+                        "connected": True,
+                        "status": "schema_needed",
+                        "message": "Connected to Supabase Cloud! Database schema missing: please run supabase_schema.sql in your Supabase SQL Editor.",
+                        "tables_ready": False,
+                    }
+        except Exception as exc:
+            return {
+                "connected": False,
+                "status": "network_error",
+                "message": f"Could not connect to Supabase: {exc}",
+                "tables_ready": False,
+            }
+
     def get_status(self) -> dict:
+        now = time.time()
+        if (
+            self._last_conn_check is None
+            or (now - self._last_conn_check_time) > 15.0
+        ):
+            if self.supabase_url and self.supabase_key:
+                self._last_conn_check = self.check_connection()
+            else:
+                self._last_conn_check = {
+                    "connected": False,
+                    "status": "key_required" if self.supabase_url else "not_configured",
+                    "message": "Supabase Service Role Key required. Enter your key in settings to connect.",
+                    "tables_ready": False,
+                }
+            self._last_conn_check_time = now
+
+        conn = self._last_conn_check
+        is_conn = conn.get("connected", False)
+
         return {
-            "mode": "supabase" if self.is_supabase_active else "sqlite_local",
-            "supabase_configured": self.is_supabase_active,
+            "mode": "supabase_active" if is_conn else "sqlite_local",
+            "supabase_configured": bool(self.supabase_url and self.supabase_key),
+            "supabase_connected": is_conn,
+            "supabase_status": conn.get("status"),
+            "supabase_message": conn.get("message"),
+            "tables_ready": conn.get("tables_ready", False),
             "supabase_url": self.supabase_url or "Not configured",
             "database_file": self._db_path,
             "tables": ["teams", "employees", "api_keys", "usage", "request_log", "cache_store"],
@@ -813,7 +958,7 @@ class SupaDB:
             return counts
 
     def _mirror_to_supabase(self, table: str, data: dict) -> None:
-        if not self.is_supabase_active:
+        if not self.is_supabase_active or not self.supabase_key:
             return
         headers = {
             "apikey": self.supabase_key,
@@ -840,11 +985,20 @@ class SupaDB:
             log.warning(f"Supabase async mirror error for table {table}: {e}")
 
     def sync_to_supabase(self, supabase_url: str, supabase_key: str) -> dict:
-        """Syncs all local tables and records into the target Supabase project."""
+        """Validates connection and syncs all local tables and records into Supabase."""
         url = supabase_url.rstrip("/")
+        key = supabase_key.strip()
+        conn = self.check_connection(url=url, key=key)
+        if not conn["connected"]:
+            return {
+                "status": "error",
+                "message": conn["message"],
+                "connection": conn,
+            }
+
         headers = {
-            "apikey": supabase_key,
-            "Authorization": f"Bearer {supabase_key}",
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
             "Prefer": "resolution=merge-duplicates",
         }
@@ -854,26 +1008,57 @@ class SupaDB:
             # Sync Teams
             teams = [dict(r) for r in self._conn.execute("SELECT * FROM teams").fetchall()]
             r = httpx.post(f"{url}/rest/v1/teams", headers=headers, json=teams, timeout=10.0)
-            synced_counts["teams"] = len(teams) if r.status_code in (200, 201) else f"Error: {r.text}"
+            if r.status_code in (200, 201):
+                synced_counts["teams"] = len(teams)
+            else:
+                synced_counts["teams"] = f"Failed ({r.status_code}): {r.text[:200]}"
 
             # Sync Employees
             emps = [dict(r) for r in self._conn.execute("SELECT * FROM employees").fetchall()]
             r = httpx.post(f"{url}/rest/v1/employees", headers=headers, json=emps, timeout=10.0)
-            synced_counts["employees"] = len(emps) if r.status_code in (200, 201) else f"Error: {r.text}"
+            if r.status_code in (200, 201):
+                synced_counts["employees"] = len(emps)
+            else:
+                synced_counts["employees"] = f"Failed ({r.status_code}): {r.text[:200]}"
 
             # Sync Keys
             keys = [dict(r) for r in self._conn.execute("SELECT * FROM api_keys").fetchall()]
             r = httpx.post(f"{url}/rest/v1/api_keys", headers=headers, json=keys, timeout=10.0)
-            synced_counts["api_keys"] = len(keys) if r.status_code in (200, 201) else f"Error: {r.text}"
+            if r.status_code in (200, 201):
+                synced_counts["api_keys"] = len(keys)
+            else:
+                synced_counts["api_keys"] = f"Failed ({r.status_code}): {r.text[:200]}"
 
             # Sync Request Logs
             logs = [dict(r) for r in self._conn.execute("SELECT * FROM request_log LIMIT 500").fetchall()]
             if logs:
                 r = httpx.post(f"{url}/rest/v1/request_log", headers=headers, json=logs, timeout=15.0)
-                synced_counts["request_log"] = len(logs) if r.status_code in (200, 201) else f"Error: {r.text}"
+                if r.status_code in (200, 201):
+                    synced_counts["request_log"] = len(logs)
+                else:
+                    synced_counts["request_log"] = f"Failed ({r.status_code}): {r.text[:200]}"
 
         self.supabase_url = url
-        self.supabase_key = supabase_key
+        self.supabase_key = key
         self.is_supabase_active = True
+        self._last_conn_check = conn
+        self._last_conn_check_time = time.time()
 
-        return {"status": "success", "synced": synced_counts}
+        # Persist to .env
+        persist_env_vars({
+            "SUPABASE_URL": url,
+            "SUPABASE_SERVICE_ROLE_KEY": key,
+        })
+
+        has_table_errors = any("Failed" in str(v) for v in synced_counts.values())
+        if has_table_errors:
+            msg = "Connected to Supabase, but some tables failed to sync. Make sure you have executed supabase_schema.sql in your Supabase SQL editor."
+        else:
+            msg = "All tables successfully synchronized to Supabase Cloud PostgreSQL!"
+
+        return {
+            "status": "partial" if has_table_errors else "success",
+            "message": msg,
+            "synced": synced_counts,
+            "connection": conn,
+        }

@@ -593,9 +593,9 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       </div>
 
       <!-- SupaDB Live Status Footnote -->
-      <div style="margin-top:22px; padding-top:14px; border-top:1px solid var(--surface-border); display:flex; align-items:center; justify-content:center; gap:8px; font-size:11px; color:var(--dim);">
-        <span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 6px var(--green);"></span>
-        <span>Connected to SupaDB Cloud (PostgreSQL)</span>
+      <div id="authDbStatusIndicator" style="margin-top:22px; padding-top:14px; border-top:1px solid var(--surface-border); display:flex; align-items:center; justify-content:center; gap:8px; font-size:11px; color:var(--dim);">
+        <span id="authDbDot" style="display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 6px var(--green);"></span>
+        <span id="authDbText">SupaDB Engine Ready</span>
       </div>
 
     </div>
@@ -655,12 +655,14 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           <div class="form-group">
             <label>Target Model</label>
             <select id="modelModeSelect" class="form-select" onchange="onModelSelectChanged()">
-              <option value="tokenmingate" selected>Token Guard: Automated Smart Routing (Recommended)</option>
+              <option value="tokenguard-auto" selected>Token Guard: Automated Smart Routing (Recommended)</option>
+              <option value="gemini-1.5-flash">Google: Gemini 1.5 Flash (Economy Model)</option>
+              <option value="gemini-1.5-pro">Google: Gemini 1.5 Pro (Balanced / Frontier Model)</option>
+              <option value="gemini-2.0-flash">Google: Gemini 2.0 Flash (Fast Tier)</option>
               <option value="gpt-4o">OpenAI: GPT-4o (Frontier Model)</option>
               <option value="gpt-4o-mini">OpenAI: GPT-4o Mini (Economy Model)</option>
               <option value="claude-3-5-sonnet">Anthropic: Claude 3.5 Sonnet (Balanced Model)</option>
               <option value="claude-3-5-haiku">Anthropic: Claude 3.5 Haiku (Economy Model)</option>
-              <option value="gemini-1.5-flash">Google: Gemini 1.5 Flash (Economy Model)</option>
               <option value="llama-3.1">Local: Llama 3.1 8B (On-Premises)</option>
             </select>
           </div>
@@ -1156,42 +1158,102 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         <div>
           <div class="panel-title">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
-            <span>SupaDB / Supabase Architecture Status</span>
+            <span>SupaDB &amp; AI Cloud Engine Configuration</span>
           </div>
-          <div class="panel-subtitle">Zero-configuration dual-mode database (PostgreSQL + SQLite fallback)</div>
+          <div class="panel-subtitle">Zero-configuration dual-mode database (PostgreSQL + SQLite fallback) and live LLM keys</div>
         </div>
         <span class="db-status-badge online" id="dbStatusBadge">Engine Active: SQLite Local</span>
       </div>
 
-      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; margin-top:16px;">
-        <div>
+      <!-- Live Connection Alert / Diagnostic Notice -->
+      <div id="dbDiagnosticNotice" style="margin-top:14px; padding:12px 16px; border-radius:8px; font-size:12.5px; display:flex; align-items:flex-start; gap:10px; background:rgba(52,231,255,0.06); border:1px solid rgba(52,231,255,0.2); color:var(--ink);">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--cyan)" stroke-width="2" style="flex-shrink:0; margin-top:1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        <div id="dbDiagnosticText">Checking Supabase connection status...</div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; margin-top:20px;">
+        <!-- Left: AI Provider Keys -->
+        <div style="background:var(--bg); border:1px solid var(--surface-border); border-radius:10px; padding:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <span style="font-size:13px; font-weight:700; color:var(--ink);">LLM Provider API Keys</span>
+            <span class="step-badge" id="geminiStatusBadge" style="background:rgba(52,231,255,0.12); color:var(--cyan); border-color:var(--cyan);">Gemini Ready</span>
+          </div>
+          <p style="font-size:11.5px; color:var(--muted); margin-bottom:14px; line-height:1.4;">
+            Keys are saved directly into your local <code class="mono">.env</code> and activated immediately for live inference.
+          </p>
           <div class="form-group">
-            <label>Supabase URL</label>
-            <input type="text" id="supabaseUrlInput" class="form-input" placeholder="https://xyzcompany.supabase.co" />
+            <label style="display:flex; justify-content:space-between;">
+              <span>Google Gemini API Key</span>
+              <span id="geminiKeyMasked" class="mono" style="font-size:11px; color:var(--cyan);"></span>
+            </label>
+            <input type="password" id="geminiKeyInput" class="form-input" placeholder="AIzaSy... (Gemini 1.5 Flash / Pro)" />
           </div>
           <div class="form-group">
-            <label>Supabase Service Role Key (API Key)</label>
-            <input type="password" id="supabaseKeyInput" class="form-input" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." />
+            <label style="display:flex; justify-content:space-between;">
+              <span>OpenAI API Key (Optional)</span>
+              <span id="openaiKeyMasked" class="mono" style="font-size:11px; color:var(--muted);"></span>
+            </label>
+            <input type="password" id="openaiKeyInput" class="form-input" placeholder="sk-proj-... (GPT-4o / Mini)" />
           </div>
-          <button class="btn-primary" onclick="syncSupabase()">
-            <span>Connect &amp; Sync Local Data to Supabase</span>
+          <div class="form-group">
+            <label style="display:flex; justify-content:space-between;">
+              <span>Anthropic API Key (Optional)</span>
+              <span id="anthropicKeyMasked" class="mono" style="font-size:11px; color:var(--muted);"></span>
+            </label>
+            <input type="password" id="anthropicKeyInput" class="form-input" placeholder="sk-ant-... (Claude 3.5 Sonnet)" />
+          </div>
+          <button class="btn-primary" onclick="saveProviderKeys()" style="width:100%; margin-top:8px;">
+            <span>Save &amp; Activate API Keys</span>
           </button>
         </div>
 
+        <!-- Right: Supabase Cloud Database -->
+        <div style="background:var(--bg); border:1px solid var(--surface-border); border-radius:10px; padding:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <span style="font-size:13px; font-weight:700; color:var(--ink);">Supabase Cloud PostgreSQL</span>
+            <span class="step-badge" id="supabaseStatusBadge" style="background:rgba(255,184,77,0.12); color:var(--amber); border-color:var(--amber);">Checking</span>
+          </div>
+          <p style="font-size:11.5px; color:var(--muted); margin-bottom:14px; line-height:1.4;">
+            Connects to your Supabase project REST API with automatic failover to local SQLite.
+          </p>
+          <div class="form-group">
+            <label>Supabase Project URL</label>
+            <input type="text" id="supabaseUrlInput" class="form-input" placeholder="https://xyzcompany.supabase.co" />
+          </div>
+          <div class="form-group">
+            <label style="display:flex; justify-content:space-between;">
+              <span>Supabase Service Role Key</span>
+              <span id="supabaseKeyMasked" class="mono" style="font-size:11px; color:var(--green);"></span>
+            </label>
+            <input type="password" id="supabaseKeyInput" class="form-input" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." />
+          </div>
+          <div style="display:flex; gap:10px; margin-top:14px;">
+            <button class="btn-feedback" onclick="saveSupabaseConfig()" style="flex:1;">
+              <span>Test &amp; Save Credentials</span>
+            </button>
+            <button class="btn-primary" onclick="syncSupabase()" style="flex:1;">
+              <span>Sync All Tables</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Relational Tables & Schema Grid -->
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; margin-top:24px;">
         <div>
           <span style="font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase;">Relational Tables Status</span>
           <div style="margin-top:8px; display:flex; flex-direction:column; gap:6px;" id="dbTablesCountList">
             <!-- Rendered by JS -->
           </div>
         </div>
-      </div>
 
-      <div style="margin-top:24px;">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <span style="font-size:12px; font-weight:600; color:var(--ink);">Supabase SQL Schema (<code class="mono">supabase_schema.sql</code>)</span>
-          <button class="btn-feedback" onclick="copySchemaSql()">Copy SQL</button>
+        <div>
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:12px; font-weight:600; color:var(--ink);">Supabase SQL Schema (<code class="mono">supabase_schema.sql</code>)</span>
+            <button class="btn-feedback" onclick="copySchemaSql()">Copy SQL</button>
+          </div>
+          <pre class="sql-viewer mono" id="schemaSqlViewer" style="max-height:180px; overflow-y:auto; margin-top:8px;">Loading schema...</pre>
         </div>
-        <pre class="sql-viewer mono" id="schemaSqlViewer">Loading schema...</pre>
       </div>
 
     </div>
@@ -1247,6 +1309,9 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   window.simulateAge = simulateAge;
   window.evictCache = evictCache;
   window.syncSupabase = syncSupabase;
+  window.saveSupabaseConfig = saveSupabaseConfig;
+  window.saveProviderKeys = saveProviderKeys;
+  window.loadConfigKeys = loadConfigKeys;
   window.copySchemaSql = copySchemaSql;
   window.loadTeams = loadTeams;
   window.saveTeam = saveTeam;
@@ -1265,9 +1330,11 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     initAuth();
     loadDemoUsers();
     loadTeams();
-    updateCodeSnippets("", "tokenmingate");
+    updateCodeSnippets("", "tokenguard-auto");
     renderCharts();
     loadSchemaSql();
+    loadDbStatus();
+    loadConfigKeys();
     // Fetch /admin/usage for observability metrics
     fetch("/admin/usage").catch(function() {});
   });
@@ -1342,6 +1409,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     } else if (tabId === 'supadb') {
       document.getElementById("paneSupadb").classList.add("active");
       loadDbStatus();
+      loadConfigKeys();
     }
   }
 
@@ -2248,14 +2316,160 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       });
   }
 
-  // SupaDB view
+  // SupaDB & Provider Configuration
+  function loadConfigKeys() {
+    fetch("/api/config/keys")
+      .then(function(r) { return r.json(); })
+      .then(function(k) {
+        if (!k) return;
+        var gm = document.getElementById("geminiKeyMasked");
+        if (gm) gm.textContent = k.gemini.configured ? ("Key: " + k.gemini.masked) : "Not Configured";
+        var gb = document.getElementById("geminiStatusBadge");
+        if (gb) {
+          gb.textContent = k.gemini.configured ? "Gemini Ready" : "Key Needed";
+          gb.className = "step-badge " + (k.gemini.configured ? "badge-tier" : "badge-pruned");
+        }
+
+        var om = document.getElementById("openaiKeyMasked");
+        if (om) om.textContent = k.openai.configured ? ("Key: " + k.openai.masked) : "Not Configured";
+
+        var am = document.getElementById("anthropicKeyMasked");
+        if (am) am.textContent = k.anthropic.configured ? ("Key: " + k.anthropic.masked) : "Not Configured";
+
+        var su = document.getElementById("supabaseUrlInput");
+        if (su && k.supabase.url && !su.value) su.value = k.supabase.url;
+        var sm = document.getElementById("supabaseKeyMasked");
+        if (sm) sm.textContent = k.supabase.configured ? ("Key: " + k.supabase.masked) : "Key Needed";
+        var sb = document.getElementById("supabaseStatusBadge");
+        if (sb) {
+          var isConn = k.supabase.status && k.supabase.status.supabase_connected;
+          sb.textContent = k.supabase.configured ? (isConn ? "Connected" : "Key Configured") : "Key Needed";
+          sb.className = "step-badge " + (isConn ? "badge-tier" : "badge-pruned");
+        }
+      })
+      .catch(function() {});
+  }
+
+  function saveProviderKeys() {
+    var gKey = (document.getElementById("geminiKeyInput").value || "").trim();
+    var oKey = (document.getElementById("openaiKeyInput").value || "").trim();
+    var aKey = (document.getElementById("anthropicKeyInput").value || "").trim();
+
+    var payload = {};
+    if (gKey) payload.gemini_api_key = gKey;
+    if (oKey) payload.openai_api_key = oKey;
+    if (aKey) payload.anthropic_api_key = aKey;
+
+    if (Object.keys(payload).length === 0) {
+      alert("Please enter at least one API key (e.g. Google Gemini API Key) to save.");
+      return;
+    }
+
+    fetch("/api/config/keys", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      alert("API Key(s) saved and activated for live gateway routing!");
+      document.getElementById("geminiKeyInput").value = "";
+      document.getElementById("openaiKeyInput").value = "";
+      document.getElementById("anthropicKeyInput").value = "";
+      loadConfigKeys();
+    })
+    .catch(function(err) {
+      alert("Failed to save keys: " + err.message);
+    });
+  }
+
+  function saveSupabaseConfig() {
+    var url = (document.getElementById("supabaseUrlInput").value || "").trim();
+    var key = (document.getElementById("supabaseKeyInput").value || "").trim();
+
+    if (!url) {
+      alert("Please provide the Supabase Project URL");
+      return;
+    }
+
+    fetch("/api/config/keys", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ supabase_url: url, supabase_key: key })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      var st = res.supabase_status || {};
+      alert((st.supabase_connected ? "Supabase Connected: " : "Status: ") + (st.supabase_message || res.message));
+      loadDbStatus();
+      loadConfigKeys();
+    })
+    .catch(function(err) {
+      alert("Failed to save Supabase config: " + err.message);
+    });
+  }
+
   function loadDbStatus() {
     fetch("/api/db/status")
       .then(function(r) { return r.json(); })
       .then(function(s) {
         var badge = document.getElementById("dbStatusBadge");
-        badge.textContent = s.supabase_configured ? "Engine: Supabase Cloud Active" : "Engine: SQLite Local Fallback";
-        badge.className = "db-status-badge " + (s.supabase_configured ? "online" : "offline");
+        var notice = document.getElementById("dbDiagnosticNotice");
+        var noticeText = document.getElementById("dbDiagnosticText");
+        var authDot = document.getElementById("authDbDot");
+        var authText = document.getElementById("authDbText");
+
+        if (s.supabase_connected) {
+          badge.textContent = "Engine Active: Supabase Cloud PostgreSQL";
+          badge.className = "db-status-badge online";
+          if (notice) {
+            notice.style.borderColor = "var(--green)";
+            notice.style.background = "rgba(40,217,160,0.08)";
+            noticeText.innerHTML = "<strong>Cloud Connected:</strong> " + esc(s.supabase_message);
+          }
+          if (authDot && authText) {
+            authDot.style.background = "var(--green)";
+            authDot.style.boxShadow = "0 0 6px var(--green)";
+            authText.textContent = "Connected to Supabase Cloud (PostgreSQL)";
+          }
+        } else if (s.supabase_status === "schema_needed") {
+          badge.textContent = "Engine: Supabase Schema Needed";
+          badge.className = "db-status-badge offline";
+          if (notice) {
+            notice.style.borderColor = "var(--amber)";
+            notice.style.background = "rgba(255,184,77,0.08)";
+            noticeText.innerHTML = "<strong>Schema Action Required:</strong> " + esc(s.supabase_message);
+          }
+          if (authDot && authText) {
+            authDot.style.background = "var(--amber)";
+            authDot.style.boxShadow = "0 0 6px var(--amber)";
+            authText.textContent = "Supabase Cloud: Schema SQL Migration Required";
+          }
+        } else if (s.supabase_status === "unauthorized") {
+          badge.textContent = "Engine: Supabase Unauthorized";
+          badge.className = "db-status-badge offline";
+          if (notice) {
+            notice.style.borderColor = "#FF5577";
+            notice.style.background = "rgba(255,85,119,0.08)";
+            noticeText.innerHTML = "<strong>Authorization Error:</strong> " + esc(s.supabase_message);
+          }
+          if (authDot && authText) {
+            authDot.style.background = "var(--amber)";
+            authText.textContent = "SQLite Local Mode (Supabase Key Pending)";
+          }
+        } else {
+          badge.textContent = "Engine Active: SQLite Local Fallback";
+          badge.className = "db-status-badge online";
+          if (notice) {
+            notice.style.borderColor = "rgba(52,231,255,0.2)";
+            notice.style.background = "rgba(52,231,255,0.06)";
+            noticeText.innerHTML = "<strong>Local Mode:</strong> " + esc(s.supabase_message || "Operating with local SQLite storage.");
+          }
+          if (authDot && authText) {
+            authDot.style.background = "var(--green)";
+            authText.textContent = "SupaDB Local Engine Ready (SQLite)";
+          }
+        }
 
         var counts = s.records_count || {};
         var html = Object.keys(counts).map(function(k) {
@@ -2265,14 +2479,15 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
             '</div>';
         }).join("");
         document.getElementById("dbTablesCountList").innerHTML = html;
-      });
+      })
+      .catch(function() {});
   }
 
   function syncSupabase() {
     var url = document.getElementById("supabaseUrlInput").value.trim();
     var key = document.getElementById("supabaseKeyInput").value.trim();
     if (!url || !key) {
-      alert("Please provide both Supabase URL and Service Role Key");
+      alert("Please provide both Supabase Project URL and Service Role Key to sync.");
       return;
     }
 
@@ -2283,11 +2498,18 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     })
     .then(function(r) { return r.json(); })
     .then(function(res) {
-      alert("Successfully synced local tables to Supabase!");
+      if (res.status === "error") {
+        alert("Supabase Error: " + (res.message || "Failed to sync"));
+      } else if (res.status === "partial") {
+        alert("Partial Sync: " + res.message);
+      } else {
+        alert("Success: " + (res.message || "All records synchronized to Supabase Cloud PostgreSQL!"));
+      }
       loadDbStatus();
+      loadConfigKeys();
     })
     .catch(function(err) {
-      alert("Sync error: " + err.message);
+      alert("Sync request failed: " + err.message);
     });
   }
 

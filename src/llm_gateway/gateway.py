@@ -112,31 +112,112 @@ class Gateway:
 
     def available_models(self) -> list[str]:
         routes = list(self.config.routes.keys())
-        if "tokenmingate" not in routes:
-            routes.insert(0, "tokenmingate")
+        for alias in ("tokenguard", "tokenguard-auto", "tokenmingate"):
+            if alias not in routes:
+                routes.insert(0, alias)
         return routes
 
     @staticmethod
     def _extract_params(payload: dict) -> dict:
         return {f: payload.get(f) for f in _PARAM_FIELDS}
 
+    def _is_auto_model(self, model: str | None) -> bool:
+        if not model:
+            return False
+        auto_names = {
+            "tokenguard",
+            "tokenguard-auto",
+            "tokenmingate",
+            "tokenmingate-auto",
+            "auto",
+            "default",
+        }
+        if self.config.complexity_auto_model:
+            auto_names.add(self.config.complexity_auto_model.lower())
+        return model.lower() in auto_names
+
+    def _is_provider_ready(self, route_name: str) -> bool:
+        """Check if the route's upstream provider has valid credentials configured."""
+        route = self.config.routes.get(route_name)
+        if route is None:
+            return False
+        prov_cfg = self.config.providers.get(route.provider)
+        if prov_cfg is None:
+            return False
+        if prov_cfg.type in ("mock", "ollama"):
+            return True
+        key = prov_cfg.resolved_key()
+        if not key:
+            return False
+        if key.startswith("your-") or key.startswith("placeholder") or key.startswith("sk-placeholder"):
+            return False
+        return True
+
     def _resolve_auto_model(self, tier: str) -> str:
-        """Map complexity tier to available model."""
+        """Map complexity tier to available model, prioritizing configured & ready providers."""
         routes = self.config.routes
-        if tier == "economy":
-            for m in ["gpt-4o-mini", "claude-3-5-haiku", "gemini-1.5-flash", "mock-cheap"]:
-                if m in routes:
+
+        # 1. First check explicit tier_models configuration if provider is ready
+        configured_model = self.config.complexity_tier_models.get(tier)
+        if (
+            configured_model
+            and configured_model in routes
+            and self._is_provider_ready(configured_model)
+        ):
+            return configured_model
+
+        # 2. Priority candidate lists by tier
+        tier_candidates = {
+            "economy": [
+                "gemini-1.5-flash",
+                "gemini-2.0-flash",
+                "gpt-4o-mini",
+                "claude-3-5-haiku",
+                "llama-3.1",
+            ],
+            "balanced": [
+                "gemini-1.5-pro",
+                "gemini-1.5-flash",
+                "claude-3-5-sonnet",
+                "gpt-4o",
+                "gpt-4o-mini",
+            ],
+            "frontier": [
+                "gemini-1.5-pro",
+                "gpt-4o",
+                "claude-3-5-sonnet",
+                "claude-3-opus",
+            ],
+        }
+
+        candidates = tier_candidates.get(tier, tier_candidates["economy"])
+
+        # Check for candidates with ready live providers (e.g. Gemini with GEMINI_API_KEY)
+        for m in candidates:
+            if m in routes and self._is_provider_ready(m):
+                prov_cfg = self.config.providers.get(routes[m].provider)
+                if prov_cfg and prov_cfg.type != "mock":
                     return m
-        elif tier == "balanced":
-            for m in ["claude-3-5-sonnet", "gpt-4o", "mock-echo"]:
-                if m in routes:
-                    return m
-        else:  # frontier
-            for m in ["gpt-4o", "claude-3-opus", "o1", "mock-echo"]:
-                if m in routes:
-                    return m
-        # Fallback to first configured route
-        return next(iter(routes.keys()), "gpt-4o-mini")
+
+        # Simulation fallback when no live external providers have credentials
+        fallback = "mock-cheap" if tier == "economy" else "mock-echo"
+        if fallback in routes and self._is_provider_ready(fallback):
+            return fallback
+
+        # Any other ready route in routes
+        for m in routes:
+            if self._is_provider_ready(m):
+                return m
+
+        # If explicit model configured, use it
+        if configured_model and configured_model in routes:
+            return configured_model
+
+        for m in candidates:
+            if m in routes:
+                return m
+
+        return next(iter(routes.keys()), "gemini-1.5-flash")
 
     # ----- main entrypoint (TokenMinGate Algorithm 1) -----------------------
 
@@ -207,7 +288,7 @@ class Gateway:
         jtf_meta["realized_tokens_saved"] = realized_saved
 
         # Dynamic Route Determination
-        is_auto_route = raw_model in ("tokenmingate", "auto", "default")
+        is_auto_route = self._is_auto_model(raw_model)
         model = raw_model
         if is_auto_route:
             pre_score = self.complexity_router.score(raw_user_prompt)
@@ -612,7 +693,7 @@ class Gateway:
                 400, "'messages' must be a non-empty list", "invalid_request_error"
             )
 
-        if model in ("tokenmingate", "auto", "default"):
+        if self._is_auto_model(model):
             user_prompts = [
                 str(m.get("content", "")) for m in messages if m.get("role") == "user"
             ]

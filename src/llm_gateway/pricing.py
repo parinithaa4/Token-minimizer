@@ -40,7 +40,11 @@ _SEED_PRICES: dict[str, ModelPrice] = {
     "gpt-4o": ModelPrice(2.5, 10.0, verify=True, source="litellm-seed"),
     "gpt-4o-mini": ModelPrice(0.15, 0.6, verify=True, source="litellm-seed"),
     "gpt-4-turbo": ModelPrice(10.0, 30.0, verify=True, source="litellm-seed"),
+    # Google Gemini
     "gemini-1.5-flash": ModelPrice(0.075, 0.30, source="litellm-seed"),
+    "gemini-1.5-pro": ModelPrice(1.25, 5.00, source="litellm-seed"),
+    "gemini-2.0-flash": ModelPrice(0.10, 0.40, source="litellm-seed"),
+    "gemini-2.0-flash-exp": ModelPrice(0.0, 0.0, source="litellm-seed"),
     "llama-3.1": ModelPrice(0.05, 0.10, source="local"),
     # Built-in simulation fallbacks:
     "mock-echo": ModelPrice(1.0, 2.0, source="mock"),

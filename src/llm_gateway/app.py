@@ -38,6 +38,12 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
@@ -55,12 +61,20 @@ from .schemas import (
     ModelList,
 )
 from .store import KeyUsage, Store, VirtualKey
-from .supadb import SupaDB
+from .supadb import SupaDB, persist_env_vars
 
 log = logging.getLogger("llm_gateway")
 
 
 # --- Request & Response Models for TokenMinGate Application ---
+
+class KeysConfigRequest(BaseModel):
+    gemini_api_key: str | None = None
+    openai_api_key: str | None = None
+    anthropic_api_key: str | None = None
+    supabase_url: str | None = None
+    supabase_key: str | None = None
+
 
 class LoginRequest(BaseModel):
     email: str
@@ -629,6 +643,99 @@ def create_app(config: GatewayConfig | None = None) -> FastAPI:
         if schema_path.exists():
             return PlainTextResponse(schema_path.read_text(encoding="utf-8"))
         return PlainTextResponse("-- supabase_schema.sql not found on disk")
+
+    # ----- Cloud Providers & API Keys Configuration -------------------------
+
+    @app.get("/api/config/keys")
+    async def api_get_keys():
+        gkey = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        okey = os.environ.get("OPENAI_API_KEY")
+        akey = os.environ.get("ANTHROPIC_API_KEY")
+        surl = supadb.supabase_url
+        skey = supadb.supabase_key
+
+        def _mask_val(v: str | None) -> str:
+            if not v or v.startswith("your-") or v == "sb_live_service_role_secret":
+                return ""
+            if len(v) <= 8:
+                return v[:2] + "****"
+            return f"{v[:4]}...{v[-4:]}"
+
+        return {
+            "gemini": {
+                "configured": bool(gkey and not gkey.startswith("your-")),
+                "masked": _mask_val(gkey),
+            },
+            "openai": {
+                "configured": bool(okey and not okey.startswith("your-")),
+                "masked": _mask_val(okey),
+            },
+            "anthropic": {
+                "configured": bool(akey and not akey.startswith("your-")),
+                "masked": _mask_val(akey),
+            },
+            "supabase": {
+                "url": surl or "",
+                "configured": bool(skey and not skey.startswith("your-")),
+                "masked": _mask_val(skey),
+                "status": supadb.get_status(),
+            },
+        }
+
+    @app.post("/api/config/keys")
+    async def api_save_keys(req: KeysConfigRequest):
+        updates: dict[str, str] = {}
+        if req.gemini_api_key is not None:
+            val = req.gemini_api_key.strip()
+            os.environ["GEMINI_API_KEY"] = val
+            updates["GEMINI_API_KEY"] = val
+            if "gemini" in gateway.config.providers:
+                gateway.config.providers["gemini"].api_key = val
+                from .providers import build_provider
+                gateway._providers["gemini"] = build_provider(gateway.config.providers["gemini"])
+
+        if req.openai_api_key is not None:
+            val = req.openai_api_key.strip()
+            os.environ["OPENAI_API_KEY"] = val
+            updates["OPENAI_API_KEY"] = val
+            if "openai" in gateway.config.providers:
+                gateway.config.providers["openai"].api_key = val
+                from .providers import build_provider
+                gateway._providers["openai"] = build_provider(gateway.config.providers["openai"])
+
+        if req.anthropic_api_key is not None:
+            val = req.anthropic_api_key.strip()
+            os.environ["ANTHROPIC_API_KEY"] = val
+            updates["ANTHROPIC_API_KEY"] = val
+            if "anthropic" in gateway.config.providers:
+                gateway.config.providers["anthropic"].api_key = val
+                from .providers import build_provider
+                gateway._providers["anthropic"] = build_provider(gateway.config.providers["anthropic"])
+
+        if req.supabase_url is not None:
+            val = req.supabase_url.strip()
+            os.environ["SUPABASE_URL"] = val
+            supadb.supabase_url = val
+            updates["SUPABASE_URL"] = val
+
+        if req.supabase_key is not None:
+            val = req.supabase_key.strip()
+            os.environ["SUPABASE_SERVICE_ROLE_KEY"] = val
+            supadb.supabase_key = val
+            supadb.is_supabase_active = bool(supadb.supabase_url and val)
+            supadb._last_conn_check = None
+            updates["SUPABASE_SERVICE_ROLE_KEY"] = val
+
+        if updates:
+            persist_env_vars(updates)
+
+        supa_status = supadb.get_status()
+
+        return {
+            "success": True,
+            "message": "Configuration updated and saved to .env",
+            "supabase_status": supa_status,
+        }
 
     # ----- Admin Endpoints (compatible with original quickstart) ------------
 

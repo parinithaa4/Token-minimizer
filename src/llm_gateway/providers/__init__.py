@@ -9,6 +9,7 @@ API) and the actual network call.
 
 from .anthropic import AnthropicProvider
 from .base import Provider, ProviderError, ProviderResult, StreamChunk
+from .gemini import GeminiProvider
 from .mock import MockProvider
 from .ollama import OllamaProvider
 from .openai import OpenAIProvider
@@ -21,6 +22,7 @@ __all__ = [
     "MockProvider",
     "OpenAIProvider",
     "AnthropicProvider",
+    "GeminiProvider",
     "OllamaProvider",
     "build_provider",
 ]
@@ -35,6 +37,8 @@ def build_provider(cfg) -> Provider:
         return OpenAIProvider(cfg)
     if t == "anthropic":
         return AnthropicProvider(cfg)
+    if t == "gemini":
+        return GeminiProvider(cfg)
     if t == "ollama":
         return OllamaProvider(cfg)
     raise ProviderError(f"unknown provider type: {t!r}")

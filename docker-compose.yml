@@ -12,6 +12,8 @@ services:
       - GATEWAY_DATABASE_URL=sqlite:///app/data/gateway.db
       - SUPABASE_URL=${SUPABASE_URL:-https://eloedezdxtvpkdxebzkc.supabase.co}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - REDIS_URL=redis://redis:6379/0
