@@ -50,7 +50,8 @@ class OpenAIProvider:
         body.pop("stream", None)  # non-streaming gateway
 
         headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-        url = f"{self.base_url}/chat/completions"
+        base = (self.base_url or "https://api.openai.com/v1").rstrip("/")
+        url = f"{base}/chat/completions"
 
         try:
             async with httpx.AsyncClient(timeout=self.cfg.timeout) as client:
@@ -120,7 +121,8 @@ class OpenAIProvider:
                 body[k] = v
 
         headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-        url = f"{self.base_url}/chat/completions"
+        base = (self.base_url or "https://api.openai.com/v1").rstrip("/")
+        url = f"{base}/chat/completions"
 
         prompt_tokens: int | None = None
         completion_tokens: int | None = None

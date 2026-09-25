@@ -7,7 +7,7 @@ cache:
 providers:
   gemini:
     type: openai
-    base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+    base_url: "https://generativelanguage.googleapis.com/v1beta/openai"
     api_key_env: GEMINI_API_KEY
 
   openai:
