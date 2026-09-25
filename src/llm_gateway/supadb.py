@@ -822,8 +822,20 @@ class SupaDB:
             "Prefer": "return=minimal",
         }
         url = f"{self.supabase_url}/rest/v1/{table}"
+
+        payload = dict(data)
+        import datetime
+        for ts_key in ("ts", "created_at", "updated_at"):
+            val = payload.get(ts_key)
+            if isinstance(val, (int, float)):
+                payload[ts_key] = datetime.datetime.fromtimestamp(
+                    val, tz=datetime.timezone.utc
+                ).isoformat()
+
         try:
-            httpx.post(url, headers=headers, json=data, timeout=3.0)
+            r = httpx.post(url, headers=headers, json=payload, timeout=3.0)
+            if r.status_code not in (200, 201):
+                log.warning(f"Supabase mirror rejected ({r.status_code}): {r.text}")
         except Exception as e:
             log.warning(f"Supabase async mirror error for table {table}: {e}")
 
